@@ -32,7 +32,9 @@ set -euo pipefail
 
 # launchd (the login LaunchAgent) runs with a minimal PATH that lacks
 # Homebrew's bin dirs, where tmux/cmux/fzf/python3 actually live here.
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+# Appended, not prepended, so a caller's own PATH (and the test suite's stub
+# dir) keeps precedence.
+export PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin"
 
 CMUX_CFG="$HOME/.config/cmux/cmux.json"
 RIG_CFG="$HOME/.config/rig/config.yaml"
@@ -61,28 +63,97 @@ except Exception:
 PY
 }
 
+# One parser for cmux.json, two modes:
+#   read  print automation.socketPassword; exit 1 (silently) if unset/unreadable
+#   heal  print the password, generating one first if socketControlMode is
+#         "password" but socketPassword is missing (exit $CMUX_CFG_HEALED
+#         then); on anything it can't fix, print ONE actionable line to
+#         stderr and exit 1. Never prints the password anywhere but stdout.
+#
+# The heal is a workaround for upstream https://github.com/manaflow-ai/cmux/issues/8372
+# (cmux's app launch rewrites cmux.json keeping socketControlMode=password
+# but dropping socketPassword, auth-locking every socket client). Remove the
+# heal mode once that bug is fixed. It always GENERATES a fresh password and
+# never restores one from cmux's cmux.*.bak backups: a password that sat in a
+# backup has to be treated as leaked.
+#
 # JSONC comment-stripping is line-anchored (`^\s*//`), so a *value* that
 # happens to start a line with `//` would be stripped too — not reachable
 # with hex-generated passwords (never start with `//`), but a real limitation
 # of this parser in general; don't put arbitrary strings starting `//` in
-# cmux.json values.
-read_cmux_password() {
-	[ -f "$CMUX_CFG" ] || return 1
-	python3 - "$CMUX_CFG" <<'PY'
-import json, re, sys
-text = open(sys.argv[1]).read()
+# cmux.json values. A healed file is written back as plain JSON (comments
+# dropped, every key kept), which is also what cmux itself writes.
+CMUX_CFG_HEALED=10
+cmux_cfg() {
+	python3 - "$1" "$CMUX_CFG" "$HOME" "$CMUX_CFG_HEALED" <<'PY'
+import json, os, re, secrets, sys, tempfile
+mode, path, home, healed_rc = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+def tilde(p):
+	for h in (home, os.path.realpath(home)):
+		if p.startswith(h + "/"):
+			return "~" + p[len(h):]
+	return p
+shown = tilde(path)
+
+def die(msg):
+	if mode == "heal":
+		print(f"ctmux: {msg}", file=sys.stderr)
+	sys.exit(1)
+
+try:
+	text = open(path).read()
+except FileNotFoundError:
+	die(f"{shown} not found — fix: open -a cmux (it creates the file), then ctmux ensure")
+except OSError as e:
+	die(f"cannot read {shown} ({e.strerror}) — fix: chmod u+r {shown}, then ctmux ensure")
 stripped = re.sub(r'(?m)^\s*//.*$', '', text)
 stripped = re.sub(r',(\s*[}\]])', r'\1', stripped)
 try:
 	data = json.loads(stripped)
-except Exception:
+except ValueError:
+	data = None
+automation = data.get("automation", {}) if isinstance(data, dict) else None
+if not isinstance(automation, dict):
+	die(f"{shown} is not valid JSON(C) — fix: run `cmux config check`, correct the file, then ctmux ensure")
+
+pw = automation.get("socketPassword") or ""
+if pw:
+	print(pw)
+	sys.exit(0)
+if mode != "heal":
 	sys.exit(1)
-pw = data.get("automation", {}).get("socketPassword") or ""
-if not pw:
-	sys.exit(1)
+if automation.get("socketControlMode") != "password":
+	die(f'{shown} has no automation.socketPassword and socketControlMode is not "password"'
+	    ' — fix: set automation.socketControlMode to "password" in it, then ctmux ensure (it generates the password)')
+
+pw = secrets.token_hex(24)
+automation["socketPassword"] = pw
+data["automation"] = automation
+target = os.path.realpath(path)  # keep a dotfiles symlink a symlink
+tmp = None
+try:
+	fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".cmux.json.")
+	with os.fdopen(fd, "w") as f:
+		os.fchmod(f.fileno(), 0o600)
+		json.dump(data, f, indent=2)
+		f.write("\n")
+		f.flush()
+		os.fsync(f.fileno())
+	os.replace(tmp, target)
+except OSError as e:
+	if tmp and os.path.exists(tmp):
+		os.unlink(tmp)
+	# Name the real file's dir: for a dotfiles symlink that's where the
+	# write needs permission, not ~/.config/cmux.
+	real = tilde(target)
+	die(f"cannot write {shown} to restore its missing socketPassword ({e.strerror})"
+	    f" — fix: chmod u+w {os.path.dirname(real)} {real}, then ctmux ensure")
 print(pw)
+sys.exit(healed_rc)
 PY
 }
+
+read_cmux_password() { cmux_cfg read; }
 
 cx() { CMUX_SOCKET_PASSWORD="$CMUX_PW" command cmux "$@"; }
 
@@ -126,8 +197,8 @@ EOF
 # login time (the bare `ensure` path); irrelevant once a specific session is
 # already known to exist (new_session skips it — see ensure_mirror).
 wait_for_tmux_session() {
-	local session="$1" i
-	for i in $(seq 1 60); do
+	local session="$1"
+	for _ in $(seq 1 60); do
 		tmux has-session -t "=$session" 2>/dev/null && return 0
 		sleep 1
 	done
@@ -135,27 +206,51 @@ wait_for_tmux_session() {
 	return 1
 }
 
+# The cmux *app*, matched by its bundle executable path. `-a` matters: macOS
+# pgrep silently skips the caller and all of its ancestors, and every shell
+# in a cmux terminal descends from the app, so a plain `pgrep -x cmux` never
+# sees it from there (https://github.com/alex-mextner/ctmux-cli/issues/3).
+# Matching the bundle path rather than the name also ignores `cmux` CLI
+# processes, which share the process name.
+cmux_app_running() { pgrep -af 'cmux\.app/Contents/MacOS/cmux( |$)' >/dev/null 2>&1; }
+
 ensure_cmux_running() {
-	pgrep -x cmux >/dev/null 2>&1 && return 0
+	cmux_app_running && return 0
 	open -a cmux
 	for _ in $(seq 1 20); do
-		pgrep -x cmux >/dev/null 2>&1 && return 0
+		cmux_app_running && return 0
 		sleep 0.3
 	done
 	echo "ctmux: cmux did not start in time" >&2
 	return 1
 }
 
+# Every failure prints exactly one actionable line (what is wrong + the fix
+# command) instead of cmux's raw auth_required error.
 ensure_socket_auth() {
-	if ! CMUX_PW=$(read_cmux_password); then
-		echo "ctmux: ~/.config/cmux/cmux.json has no automation.socketPassword set." >&2
-		return 1
+	local rc=0 out=""
+	CMUX_PW=$(cmux_cfg heal) || rc=$?
+	if [ "$rc" -eq "$CMUX_CFG_HEALED" ]; then
+		# cmux only learns the new password on reload. Try authenticating
+		# with it first; fall back to no password so a run from inside a
+		# cmux terminal can still use its per-terminal socket capability.
+		if ! cx reload-config >/dev/null 2>&1 &&
+			! env -u CMUX_SOCKET_PASSWORD cmux reload-config >/dev/null 2>&1; then
+			echo "ctmux: wrote a new automation.socketPassword to ~/.config/cmux/cmux.json but \`cmux reload-config\` failed, so cmux doesn't know it yet — fix: run \`cmux reload-config\` in a cmux terminal, then ctmux ensure" >&2
+			return 1
+		fi
+	elif [ "$rc" -ne 0 ]; then
+		return 1 # cmux_cfg already printed the actionable line
 	fi
 	for _ in $(seq 1 20); do
-		cx ping >/dev/null 2>&1 && return 0
+		out=$(cx ping 2>&1) && return 0
 		sleep 0.3
 	done
-	echo "ctmux: cmux socket not reachable after launch." >&2
+	if printf '%s' "$out" | grep -qiE 'auth_required|authentication required|invalid password'; then
+		echo "ctmux: cmux rejected the socket password in ~/.config/cmux/cmux.json (it is running with a different one) — fix: run \`cmux reload-config\` in a cmux terminal, then ctmux ensure" >&2
+	else
+		echo "ctmux: cmux socket not reachable (\`cmux ping\` keeps failing) — fix: open -a cmux, wait for its window, then ctmux ensure" >&2
+	fi
 	return 1
 }
 
@@ -248,8 +343,7 @@ focus_session_workspace() {
 	if [ -z "${CMUX_PW:-}" ] && ! CMUX_PW=$(read_cmux_password); then
 		return 0
 	fi
-	local i
-	for i in $(seq 1 20); do
+	for _ in $(seq 1 20); do
 		ref=$(cx workspace list --json 2>/dev/null | python3 -c "
 import json, sys
 target = sys.argv[1]
@@ -313,6 +407,9 @@ picker() {
 	IFS=$'\t' read -r session _ <<<"$sel"
 	launch_and_focus "$session"
 }
+
+# Sourceable (tests load the functions): dispatch only when executed.
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
 cmd="${1:-}"
 case "$cmd" in

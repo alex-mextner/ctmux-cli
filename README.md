@@ -77,7 +77,14 @@ ctmux ensure      # idempotent mirror-check only (used by the LaunchAgent)
   outside cmux's own terminals: `ctmux` expects
   `~/.config/cmux/cmux.json` → `automation.socketControlMode: "password"`
   with `automation.socketPassword` set (`ctmux` reads the password from
-  there; it does not generate one for you).
+  there). If password mode is on but the password is missing — cmux's app
+  launch drops it, upstream bug
+  [manaflow-ai/cmux#8372](https://github.com/manaflow-ai/cmux/issues/8372) —
+  `ctmux` generates a fresh random one, writes it back (mode 0600, every
+  other key kept) and runs `cmux reload-config`. It never restores the
+  password from cmux's `cmux.*.bak` backups. This self-heal is a workaround
+  and can be removed once that upstream bug is fixed. Anything it can't
+  fix is reported as one line naming the problem and the fix command.
 - The "Remote tmux" beta flag has no `cmux.json` key — it's a UserDefaults
   key (`com.cmuxterm.app`, `remoteTmux.beta.enabled`), read synchronously per
   call. `ctmux` flips it itself the first time it hits the "disabled" error;
@@ -98,3 +105,12 @@ ctmux ensure      # idempotent mirror-check only (used by the LaunchAgent)
   tmux's own current-window state — that's shared by every attached client,
   including a live outer terminal — deliberately, to avoid yanking your
   actual terminal's view out from under you.
+
+## Tests
+
+```sh
+bash tests/ctmux_test.sh
+```
+
+Black-box tests against stub `cmux`/`pgrep`/`open`/`ssh`/`tmux` binaries and a
+fixture `HOME`; they never touch the real `~/.config/cmux` or the live cmux app.
