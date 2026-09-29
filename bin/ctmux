@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+# ctmux — wrapper around cmux's "Remote tmux" (tmux -CC control mode) feature,
+# looped back to the LOCAL tmux server over SSH to localhost. Gives cmux's
+# native split/tab/selection UI over your EXISTING tmux sessions.
+#
+# Why SSH to localhost: cmux's control-mode integration is built exclusively
+# as an SSH feature (their own naming choice — the protocol itself doesn't
+# care local vs remote; plain drag = native selection either way, Shift only
+# needed when the app inside a pane captures the mouse itself). Looping it to
+# 127.0.0.1 is the only way to get real window->tab / pane->split mapping
+# without changing anything about the tmux server: rig/resurrect/continuum/
+# tg/Moshi all keep working unchanged — this just adds another client.
+#
+# The "Remote tmux" beta flag has no cmux.json key, but it IS a plain
+# UserDefaults key (bundle id com.cmuxterm.app, key
+# remoteTmux.beta.enabled) read synchronously per call — ctmux flips it
+# itself the first time it hits the "disabled" error, no GUI click needed.
+#
+# Usage:
+#   ctmux            ensure the mirror is up, launch cmux (and cmux itself,
+#                     since it launches on demand — see ensure_cmux_running)
+#   ctmux ls          fzf picker over session:window pairs; Enter mirrors
+#                     and focuses that SESSION (window-level focus inside a
+#                     mirrored session isn't wired up yet); pick
+#                     "+ new session" to create one
+#   ctmux new [name]  create a new tmux session (auto-named if omitted),
+#                     ensure the mirror, focus it
+#   ctmux ensure      idempotent mirror-check only, no picker (still opens
+#                     cmux if it isn't running — the login LaunchAgent relies
+#                     on this to bring cmux up automatically)
+set -euo pipefail
+
+# launchd (the login LaunchAgent) runs with a minimal PATH that lacks
+# Homebrew's bin dirs, where tmux/cmux/fzf/python3 actually live here.
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+
+CMUX_CFG="$HOME/.config/cmux/cmux.json"
+RIG_CFG="$HOME/.config/rig/config.yaml"
+CMUX_BUNDLE_ID="com.cmuxterm.app"
+# Set by ensure_socket_auth, consumed by cx() via dynamic scope — every path
+# that calls cx() must go through ensure_socket_auth (or otherwise assign
+# CMUX_PW) first. Initialized empty so `set -u`-style callers never see
+# "unbound variable" even before that happens.
+CMUX_PW=""
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# The canonical tmux session name, sourced from rig's own anti_sprawl config
+# (tmux.anti_sprawl.session in rig/config.yaml — the same value
+# ~/.config/rig/tmux/tmux-attach.sh uses) so this never drifts from rig's.
+canonical_session() {
+	python3 - "$RIG_CFG" <<'PY' 2>/dev/null || echo main
+import sys
+try:
+	import yaml
+	data = yaml.safe_load(open(sys.argv[1]))
+	name = data.get("tmux", {}).get("anti_sprawl", {}).get("session")
+	print(name or "main")
+except Exception:
+	print("main")
+PY
+}
+
+# JSONC comment-stripping is line-anchored (`^\s*//`), so a *value* that
+# happens to start a line with `//` would be stripped too — not reachable
+# with hex-generated passwords (never start with `//`), but a real limitation
+# of this parser in general; don't put arbitrary strings starting `//` in
+# cmux.json values.
+read_cmux_password() {
+	[ -f "$CMUX_CFG" ] || return 1
+	python3 - "$CMUX_CFG" <<'PY'
+import json, re, sys
+text = open(sys.argv[1]).read()
+stripped = re.sub(r'(?m)^\s*//.*$', '', text)
+stripped = re.sub(r',(\s*[}\]])', r'\1', stripped)
+try:
+	data = json.loads(stripped)
+except Exception:
+	sys.exit(1)
+pw = data.get("automation", {}).get("socketPassword") or ""
+if not pw:
+	sys.exit(1)
+print(pw)
+PY
+}
+
+cx() { CMUX_SOCKET_PASSWORD="$CMUX_PW" command cmux "$@"; }
+
+check_sshd() {
+	if ! nc -z -w1 localhost 22 2>/dev/null; then
+		cat >&2 <<'EOF'
+ctmux: SSH (Remote Login) is not reachable on localhost:22.
+Fix: System Settings > General > Sharing > Remote Login > On.
+Security note: this binds sshd on ALL interfaces, not just loopback, even
+though ctmux only ever talks to 127.0.0.1. If this machine is ever on an
+untrusted network, restrict it: add "ListenAddress 127.0.0.1" to
+/etc/ssh/sshd_config (or the modern /etc/ssh/sshd_config.d/ drop-in) and keep
+key-only auth (PasswordAuthentication no) — ctmux's own localhost check still
+passes either way.
+EOF
+		return 1
+	fi
+	if ! ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new localhost true 2>/dev/null; then
+		if ssh -vo BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new localhost true 2>&1 | grep -qi "host key verification failed"; then
+			cat >&2 <<'EOF'
+ctmux: SSH to localhost failed host-key verification. Fix (loopback only,
+safe to auto-accept):
+  ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+EOF
+		else
+			cat >&2 <<'EOF'
+ctmux: SSH to localhost needs a key-based login (no password prompt allowed
+for an automated mirror). Fix — restrict the key to loopback only, so a
+leaked private key can't be used to log in remotely:
+  printf 'from="127.0.0.1,::1" %s ctmux-loopback\n' "$(cat ~/.ssh/id_ed25519.pub | awk '{print $1" "$2}')" >> ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/authorized_keys
+EOF
+		fi
+		return 1
+	fi
+}
+
+# Bounded wait for rig's own tmux-boot LaunchAgent to have started the server
+# and created the canonical session — avoids a login-time race where ctmux's
+# LaunchAgent fires before rig's does and mirrors nothing. Only meaningful at
+# login time (the bare `ensure` path); irrelevant once a specific session is
+# already known to exist (new_session skips it — see ensure_mirror).
+wait_for_tmux_session() {
+	local session="$1" i
+	for i in $(seq 1 60); do
+		tmux has-session -t "=$session" 2>/dev/null && return 0
+		sleep 1
+	done
+	echo "ctmux: tmux session '$session' never appeared after 60s wait." >&2
+	return 1
+}
+
+ensure_cmux_running() {
+	pgrep -x cmux >/dev/null 2>&1 && return 0
+	open -a cmux
+	for _ in $(seq 1 20); do
+		pgrep -x cmux >/dev/null 2>&1 && return 0
+		sleep 0.3
+	done
+	echo "ctmux: cmux did not start in time" >&2
+	return 1
+}
+
+ensure_socket_auth() {
+	if ! CMUX_PW=$(read_cmux_password); then
+		echo "ctmux: ~/.config/cmux/cmux.json has no automation.socketPassword set." >&2
+		return 1
+	fi
+	for _ in $(seq 1 20); do
+		cx ping >/dev/null 2>&1 && return 0
+		sleep 0.3
+	done
+	echo "ctmux: cmux socket not reachable after launch." >&2
+	return 1
+}
+
+# True once a control-mode client is actually attached and mirroring $1.
+# Builds the RPC payload with json.dumps (not string interpolation): a
+# session name containing a literal `"` would otherwise corrupt the JSON —
+# or, worse, inject an extra key if cmux's parser is lenient about duplicate
+# keys.
+mirror_active() {
+	local session="$1" out payload
+	payload=$(python3 -c 'import json, sys; print(json.dumps({"host": "localhost", "session": sys.argv[1]}))' "$session")
+	out=$(cx rpc remote.tmux.state "$payload" 2>/dev/null) || return 1
+	python3 - "$out" <<'PY' 2>/dev/null
+import json, sys
+try:
+	d = json.loads(sys.argv[1])
+except Exception:
+	sys.exit(1)
+sys.exit(0 if d.get("attached") and d.get("started") else 1)
+PY
+}
+
+enable_beta_flag() {
+	defaults write "$CMUX_BUNDLE_ID" remoteTmux.beta.enabled -bool true 2>/dev/null
+}
+
+# Idempotent (~1s, proven safe to re-run): always calls `ssh-tmux localhost`
+# rather than trusting a cache, so it also picks up sessions created outside
+# ctmux (a fresh window from rig/resurrect at boot, a session made by hand).
+#
+# $1 (optional): the session to confirm mirrored afterward. Omit it for the
+# login-race path (bare `ctmux`/`ctmux ensure`), where ctmux also waits for
+# the canonical session to exist before mirroring at all — that wait is
+# meaningless for a session that was JUST created (new_session passes its own
+# name and skips it; waiting for an unrelated canonical session to appear
+# would wrongly block or fail session creation on a machine that doesn't run
+# it).
+ensure_mirror() {
+	local target="${1:-}" canonical
+	canonical=$(canonical_session)
+	check_sshd || return 1
+	if [ -z "$target" ]; then
+		wait_for_tmux_session "$canonical" || return 1
+		target="$canonical"
+	fi
+	ensure_cmux_running || return 1
+	ensure_socket_auth || return 1
+
+	local out
+	if out=$(cx ssh-tmux localhost --no-focus 2>&1); then
+		mirror_active "$target" || echo "ctmux: ssh-tmux reported success but $target isn't confirmed attached yet (state may lag briefly)." >&2
+		return 0
+	fi
+
+	if printf '%s' "$out" | grep -qi "remote tmux beta is disabled"; then
+		enable_beta_flag
+		if ! out=$(cx ssh-tmux localhost --no-focus 2>&1); then
+			echo "ctmux: still failing after enabling the beta flag: $out" >&2
+			return 1
+		fi
+		mirror_active "$target" || echo "ctmux: ssh-tmux reported success but $target isn't confirmed attached yet (state may lag briefly)." >&2
+		return 0
+	fi
+
+	# Any other failure is real — do not pattern-match hopeful substrings
+	# ("already"/"mirrored") in an error we haven't actually observed cmux
+	# produce; that would mask a genuine failure (connection refused, host
+	# key mismatch, ...) as success.
+	echo "ctmux: $out" >&2
+	return 1
+}
+
+# Focuses the cmux workspace mirroring $1 (a tmux session name) — cmux side
+# ONLY. Deliberately does not touch tmux's own current-window state: that is
+# shared by every attached client, including your live outer terminal, and
+# `tmux select-window` would yank its view out from under you. Window-level
+# (tab-level) focus inside the workspace isn't wired up yet — this gets you
+# to the right session, not necessarily the exact window within it.
+#
+# Bounded retry: the workspace for a session created moments ago may not
+# exist yet even though ssh-tmux itself reported success (state lags
+# briefly, same as mirror_active). A silent single-shot lookup would
+# otherwise no-op without any feedback.
+focus_session_workspace() {
+	local session="$1" ref=""
+	# CMUX_PW is expected to already be set by ensure_socket_auth (every
+	# real caller reaches this via launch_and_focus -> ensure_mirror ->
+	# ensure_socket_auth first, in the same process). Re-derive it only as
+	# a defensive fallback for a future caller that skips that path.
+	if [ -z "${CMUX_PW:-}" ] && ! CMUX_PW=$(read_cmux_password); then
+		return 0
+	fi
+	local i
+	for i in $(seq 1 20); do
+		ref=$(cx workspace list --json 2>/dev/null | python3 -c "
+import json, sys
+target = sys.argv[1]
+try:
+	d = json.load(sys.stdin)
+	for w in d.get('workspaces', []):
+		if w.get('title') == target:
+			print(w['ref'])
+			break
+except Exception:
+	pass
+" "$session" 2>/dev/null) || true
+		[ -n "$ref" ] && break
+		sleep 0.3
+	done
+	if [ -z "$ref" ]; then
+		echo "ctmux: couldn't find a cmux workspace for session '$session' yet — it may still be mirroring; try 'ctmux ls' in a moment." >&2
+		return 0
+	fi
+	cx workspace select "$ref" >/dev/null 2>&1 || true
+}
+
+launch_and_focus() {
+	local target="$1"
+	ensure_mirror "$target"
+	open -a cmux
+	focus_session_workspace "$target"
+}
+
+new_session() {
+	local name="${1:-}"
+	if [ -z "$name" ]; then
+		name="ws-$(date +%H%M%S)"
+	fi
+	if tmux has-session -t "=$name" 2>/dev/null; then
+		echo "ctmux: session '$name' already exists, attaching to it." >&2
+	else
+		tmux new-session -d -s "$name" -c "$HOME"
+	fi
+	launch_and_focus "$name"
+}
+
+picker() {
+	have fzf || { echo "ctmux: fzf not found (brew install fzf)" >&2; exit 1; }
+	# Single tmux call across all sessions, tab-delimited so a session name
+	# with spaces (tmux allows them) doesn't get word-split by a `for x in
+	# $(...)` loop or misparsed by an awk-on-spaces field split later.
+	local rows sel
+	rows=$(tmux list-windows -a -F $'#{session_name}\t#{window_index} (#{window_name})' 2>/dev/null) || rows=""
+	sel=$({ [ -n "$rows" ] && printf '%s\n' "$rows"; printf '+ new session\n'; } | fzf --prompt='ctmux> ' --height=50% --reverse \
+		--header='enter: mirror + focus this session in cmux') || exit 0
+	[ -n "$sel" ] || exit 0
+	if [ "$sel" = "+ new session" ]; then
+		printf 'new session name: '
+		local name=""
+		read -r name || true
+		new_session "$name"
+		return
+	fi
+	local session
+	IFS=$'\t' read -r session _ <<<"$sel"
+	launch_and_focus "$session"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+	ls)
+		picker
+		;;
+	new)
+		shift || true
+		new_session "${1:-}"
+		;;
+	ensure)
+		ensure_mirror
+		;;
+	"")
+		ensure_mirror
+		open -a cmux
+		;;
+	*)
+		echo "ctmux: unknown command '$cmd' (try: ls, new [name], ensure, or no args)" >&2
+		exit 1
+		;;
+esac
