@@ -76,8 +76,17 @@ ctmux ensure      # idempotent mirror-check only (used by the LaunchAgent)
 - cmux (`brew install --cask cmux`). The socket must be reachable from
   outside cmux's own terminals: `ctmux` expects
   `~/.config/cmux/cmux.json` → `automation.socketControlMode: "password"`
-  with `automation.socketPassword` set (`ctmux` reads the password from
-  there; it does not generate one for you).
+  and reads the password from `automation.socketPassword` there. If
+  password mode is on but the password is missing — cmux's app launch drops
+  it, upstream bug
+  [manaflow-ai/cmux#8372](https://github.com/manaflow-ai/cmux/issues/8372),
+  which after a reboot breaks cmux's auto-resumed `cmux restore tmux main`
+  with `auth_required` — `ctmux ensure` generates a fresh random one,
+  writes it back (mode 0600, every other key kept, comments dropped) and
+  runs `cmux reload-config`. It never restores the password from cmux's
+  `cmux.*.bak` backups. This self-heal is a workaround and can be removed
+  once that upstream bug is fixed. Anything it can't fix is reported as one
+  line naming the problem and the fix command.
 - The "Remote tmux" beta flag has no `cmux.json` key — it's a UserDefaults
   key (`com.cmuxterm.app`, `remoteTmux.beta.enabled`), read synchronously per
   call. `ctmux` flips it itself the first time it hits the "disabled" error;
