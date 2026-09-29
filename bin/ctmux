@@ -31,8 +31,14 @@
 set -euo pipefail
 
 # launchd (the login LaunchAgent) runs with a minimal PATH that lacks
-# Homebrew's bin dirs, where tmux/cmux/fzf/python3 actually live here.
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+# Homebrew's bin dirs, where tmux/cmux/fzf/python3 actually live here. Only
+# the missing ones are prepended, so a caller's own PATH order (and the test
+# suite's stub dir) keeps precedence.
+for _dir in /usr/local/bin /opt/homebrew/sbin /opt/homebrew/bin; do
+	case ":$PATH:" in *":$_dir:"*) ;; *) PATH="$_dir:$PATH" ;; esac
+done
+unset _dir
+export PATH
 
 CMUX_CFG="$HOME/.config/cmux/cmux.json"
 RIG_CFG="$HOME/.config/rig/config.yaml"
@@ -126,8 +132,8 @@ EOF
 # login time (the bare `ensure` path); irrelevant once a specific session is
 # already known to exist (new_session skips it — see ensure_mirror).
 wait_for_tmux_session() {
-	local session="$1" i
-	for i in $(seq 1 60); do
+	local session="$1"
+	for _ in $(seq 1 60); do
 		tmux has-session -t "=$session" 2>/dev/null && return 0
 		sleep 1
 	done
@@ -135,11 +141,19 @@ wait_for_tmux_session() {
 	return 1
 }
 
+# The cmux *app*, matched by its bundle executable path. `-a` matters: macOS
+# pgrep silently skips the caller and all of its ancestors, and every shell
+# in a cmux terminal descends from the app, so a plain `pgrep -x cmux` never
+# sees it from there (https://github.com/alex-mextner/ctmux-cli/issues/3).
+# Matching the bundle path rather than the name also ignores `cmux` CLI
+# processes (Contents/Resources/bin/cmux), which share the process name.
+cmux_app_running() { pgrep -af 'cmux\.app/Contents/MacOS/cmux( |$)' >/dev/null 2>&1; }
+
 ensure_cmux_running() {
-	pgrep -x cmux >/dev/null 2>&1 && return 0
+	cmux_app_running && return 0
 	open -a cmux
 	for _ in $(seq 1 20); do
-		pgrep -x cmux >/dev/null 2>&1 && return 0
+		cmux_app_running && return 0
 		sleep 0.3
 	done
 	echo "ctmux: cmux did not start in time" >&2
@@ -248,8 +262,7 @@ focus_session_workspace() {
 	if [ -z "${CMUX_PW:-}" ] && ! CMUX_PW=$(read_cmux_password); then
 		return 0
 	fi
-	local i
-	for i in $(seq 1 20); do
+	for _ in $(seq 1 20); do
 		ref=$(cx workspace list --json 2>/dev/null | python3 -c "
 import json, sys
 target = sys.argv[1]
@@ -313,6 +326,9 @@ picker() {
 	IFS=$'\t' read -r session _ <<<"$sel"
 	launch_and_focus "$session"
 }
+
+# Sourceable (tests load the functions): dispatch only when executed.
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
 cmd="${1:-}"
 case "$cmd" in

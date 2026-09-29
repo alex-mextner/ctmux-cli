@@ -98,3 +98,13 @@ ctmux ensure      # idempotent mirror-check only (used by the LaunchAgent)
   tmux's own current-window state — that's shared by every attached client,
   including a live outer terminal — deliberately, to avoid yanking your
   actual terminal's view out from under you.
+
+## Tests
+
+```sh
+bash tests/ctmux_test.sh
+```
+
+Black-box tests against stub `cmux`/`pgrep`/`open`/`ssh`/`tmux` binaries and a
+fixture `HOME`; they never touch the real `~/.config/cmux` or the live cmux
+app (macOS only: the cmux-detection tests use the real `/usr/bin/pgrep`).
