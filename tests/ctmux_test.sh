@@ -7,9 +7,13 @@
 # touched (CMUX_SOCKET_PATH also points into the fixture, in case a real
 # cmux binary is ever reached). The fake `cmux` models the socket auth: an
 # authenticated command succeeds only when CMUX_SOCKET_PASSWORD equals the
-# password the "app" has loaded ($W/app_pw).
+# password the "app" has loaded ($W/app_pw), which it loads from cmux.json
+# on `cmux reload-config` (or on every call with $W/app_watches_cfg, like
+# the real app's file watcher).
 #
 # Run: bash tests/ctmux_test.sh
+# Fixture JSON contains literal "$schema" keys, single-quoted on purpose.
+# shellcheck disable=SC2016
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,7 +42,36 @@ new_world() {
 	cat >"$W/bin/cmux" <<'SH'
 #!/bin/bash
 echo "cmux $1" >>"$W/calls"
+cfg_pw() {
+	python3 - "$HOME/.config/cmux/cmux.json" <<'PY'
+import json, re, sys
+try:
+	t = re.sub(r'(?m)^\s*//.*$', '', open(sys.argv[1]).read())
+	t = re.sub(r',(\s*[}\]])', r'\1', t)
+	print(json.loads(t).get("automation", {}).get("socketPassword") or "", end="")
+except Exception:
+	pass
+PY
+}
+[ -f "$W/app_watches_cfg" ] && cfg_pw >"$W/app_pw"
+if [ "$1" = reload-config ]; then
+	[ -f "$W/reload_fail" ] && { echo "Error: reload failed" >&2; exit 1; }
+	cfg_pw >"$W/app_pw"
+	exit 0
+fi
 [ -f "$W/socket_down" ] && { echo "Error: Failed to connect to socket" >&2; exit 1; }
+# The app's launch drops the saved password (upstream cmux#8372) just after
+# ctmux first read it.
+if [ "$1" = ping ] && [ -f "$W/drop_pw_on_first_ping" ]; then
+	rm "$W/drop_pw_on_first_ping"
+	python3 - "$HOME/.config/cmux/cmux.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["automation"].pop("socketPassword", None)
+json.dump(d, open(sys.argv[1], "w"))
+PY
+	: >"$W/app_pw"
+fi
 if [ -z "${CMUX_SOCKET_PASSWORD:-}" ] || [ "$CMUX_SOCKET_PASSWORD" != "$(cat "$W/app_pw" 2>/dev/null)" ]; then
 	echo "Error: auth_required: Authentication required. Send auth <password> first." >&2
 	exit 1
@@ -77,6 +110,45 @@ run_ctmux() {
 write_cfg() { printf '%s\n' "$1" >"$CFG"; chmod 600 "$CFG"; }
 app_has_pw() { printf '%s' "$1" >"$W/app_pw"; }
 calls() { cat "$W/calls"; }
+json_get() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2], {}, {"d": d}))' "$CFG" "$1"; }
+file_mode() { stat -L -f '%Lp' "$1"; }
+line_count() { awk 'END{print NR}' "$1"; }
+
+PASSWORDLESS='{
+  "$schema": "https://example.invalid/cmux.schema.json",
+  "automation": {"socketControlMode": "password", "keepMe": 7},
+  "app": {"theme": "dark"},
+  "schemaVersion": 1
+}'
+LEAKED_BAK_PW="0123456789abcdef0123456789abcdef0123456789abcdef"
+
+assert_healed() {
+	local pw
+	[ "$RC" -eq 0 ] || fail "exit $RC, stderr: $(cat "$W/err")" || return 1
+	pw=$(json_get 'd["automation"]["socketPassword"]')
+	[[ "$pw" =~ ^[0-9a-f]{48}$ ]] || fail "socketPassword is not 48 hex chars" || return 1
+	[ "$pw" != "$LEAKED_BAK_PW" ] || fail "restored the (compromised) .bak password" || return 1
+	[ "$(file_mode "$CFG")" = 600 ] || fail "mode $(file_mode "$CFG") != 600" || return 1
+	[ "$(json_get 'd["automation"]["socketControlMode"]')" = password ] || fail "mode key lost" || return 1
+	[ "$(json_get 'd["automation"]["keepMe"]')" = 7 ] || fail "automation.keepMe lost" || return 1
+	[ "$(json_get 'd["app"]["theme"]')" = dark ] || fail "app.theme lost" || return 1
+	[ "$(json_get 'd["schemaVersion"]')" = 1 ] || fail "schemaVersion lost" || return 1
+	[ "$(json_get 'd["$schema"]')" = "https://example.invalid/cmux.schema.json" ] || fail "\$schema lost" || return 1
+	calls | grep -qx 'cmux reload-config' || fail "cmux reload-config not called" || return 1
+	calls | grep -A99 'cmux reload-config' | grep -qx 'cmux ssh-tmux' || fail "mirror (ssh-tmux) not completed after reload" || return 1
+	! grep -qF "$pw" "$W/out" "$W/err" || fail "password printed" || return 1
+}
+
+# Exactly one stderr line, mentioning $1, containing a fix command, and never
+# the raw cmux errors.
+assert_one_actionable_line() {
+	[ "$RC" -ne 0 ] || fail "expected non-zero exit" || return 1
+	[ "$(line_count "$W/err")" = 1 ] || fail "stderr has $(line_count "$W/err") lines: $(cat "$W/err")" || return 1
+	grep -q "$1" "$W/err" || fail "stderr lacks '$1': $(cat "$W/err")" || return 1
+	grep -q 'fix: ' "$W/err" || fail "stderr has no 'fix: ' command: $(cat "$W/err")" || return 1
+	! grep -qiE 'auth_required|socket not reachable after launch' "$W/err" || fail "raw error leaked: $(cat "$W/err")" || return 1
+	! calls | grep -qx 'cmux ssh-tmux' || fail "continued to ssh-tmux after failure" || return 1
+}
 
 # ---------- #3: cmux-running detection ----------
 
@@ -153,6 +225,150 @@ test_cmux_cli_process_is_not_the_app() {
 	kill "$cli_pid" 2>/dev/null || true
 	wait "$cli_pid" 2>/dev/null || true
 	[ "$(calls | grep -c '^open -a cmux$')" = 1 ] || fail "app not launched while only a cmux CLI process runs: $(calls)"
+}
+
+# ---------- #2: socket password self-heal ----------
+
+test_heals_missing_password_ignoring_bak() {
+	write_cfg "$PASSWORDLESS"
+	printf '{"automation":{"socketControlMode":"password","socketPassword":"%s"}}\n' "$LEAKED_BAK_PW" \
+		>"$W/home/.config/cmux/cmux.20260925T171749.bak"
+	run_ctmux ensure
+	assert_healed
+}
+
+test_heals_missing_password_without_bak() {
+	write_cfg "$PASSWORDLESS"
+	chmod 644 "$CFG"
+	run_ctmux ensure
+	assert_healed
+}
+
+test_heals_jsonc_config() {
+	write_cfg '{
+  // cmux writes JSONC
+  "$schema": "https://example.invalid/cmux.schema.json",
+  "automation": {"socketControlMode": "password", "keepMe": 7,},
+  // trailing commas too
+  "app": {"theme": "dark"},
+  "schemaVersion": 1,
+}'
+	run_ctmux ensure
+	assert_healed
+}
+
+test_heal_writes_through_symlink() {
+	mkdir -p "$W/dotfiles"
+	printf '%s\n' "$PASSWORDLESS" >"$W/dotfiles/cmux.json"
+	ln -s "$W/dotfiles/cmux.json" "$CFG"
+	run_ctmux ensure
+	[ -L "$CFG" ] || fail "symlink replaced by a regular file" || return 1
+	assert_healed
+}
+
+# Right after `open -a cmux` the app may still be about to drop the password
+# ctmux just read: ctmux has to notice and heal then, not report "rejected".
+test_heals_password_dropped_after_first_read() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	touch "$W/drop_pw_on_first_ping"
+	run_ctmux ensure
+	[ "$RC" -eq 0 ] || fail "exit $RC: $(cat "$W/err")" || return 1
+	[[ "$(json_get 'd["automation"]["socketPassword"]')" =~ ^[0-9a-f]{48}$ ]] || fail "password not regenerated" || return 1
+	calls | grep -qx 'cmux ssh-tmux' || fail "mirror not run"
+}
+
+# cmux's file watcher picks the new password up by itself: a failing
+# reload-config then doesn't matter, the ping decides.
+test_heal_ok_when_reload_fails_but_cmux_picked_it_up() {
+	write_cfg "$PASSWORDLESS"
+	touch "$W/reload_fail" "$W/app_watches_cfg"
+	run_ctmux ensure
+	[ "$RC" -eq 0 ] || fail "exit $RC: $(cat "$W/err")" || return 1
+	calls | grep -qx 'cmux ssh-tmux' || fail "mirror not run"
+}
+
+test_present_accepted_password_is_left_alone() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	local before
+	before=$(cat "$CFG")
+	run_ctmux ensure
+	[ "$RC" -eq 0 ] || fail "exit $RC: $(cat "$W/err")" || return 1
+	[ "$(cat "$CFG")" = "$before" ] || fail "config rewritten" || return 1
+	! calls | grep -qx 'cmux reload-config' || fail "needless reload-config" || return 1
+	calls | grep -qx 'cmux ssh-tmux' || fail "mirror not run"
+}
+
+test_unparseable_config() {
+	write_cfg '{"automation": {"socketControlMode": "password",'
+	local before
+	before=$(cat "$CFG")
+	run_ctmux ensure
+	assert_one_actionable_line 'not valid JSON' || return 1
+	[ "$(cat "$CFG")" = "$before" ] || fail "unparseable config was modified"
+}
+
+test_missing_config() {
+	run_ctmux ensure
+	assert_one_actionable_line 'cmux.json not found'
+}
+
+test_password_mode_off_and_no_password() {
+	write_cfg '{"automation":{"socketControlMode":"cmuxOnly"}}'
+	run_ctmux ensure
+	assert_one_actionable_line 'socketControlMode' || return 1
+	[ "$(json_get 'd["automation"].get("socketPassword", "")')" = "" ] || fail "wrote a password outside password mode"
+}
+
+test_unwritable_config_dir() {
+	write_cfg "$PASSWORDLESS"
+	chmod 500 "$W/home/.config/cmux"
+	run_ctmux ensure
+	chmod 700 "$W/home/.config/cmux"
+	assert_one_actionable_line 'cannot write' || return 1
+	grep -q 'chmod' "$W/err" || fail "fix is not a chmod: $(cat "$W/err")"
+}
+
+# The fix must name the directory that actually needs write permission: for
+# a dotfiles symlink that is the link target's, not ~/.config/cmux.
+test_unwritable_symlink_target_dir() {
+	mkdir -p "$W/dotfiles"
+	printf '%s\n' "$PASSWORDLESS" >"$W/dotfiles/cmux.json"
+	ln -s "$W/dotfiles/cmux.json" "$CFG"
+	chmod 500 "$W/dotfiles"
+	run_ctmux ensure
+	chmod 700 "$W/dotfiles"
+	assert_one_actionable_line 'cannot write' || return 1
+	local real_dir
+	real_dir=$(cd -P "$W/dotfiles" && pwd)
+	grep -qF "chmod u+w $real_dir " "$W/err" || fail "fix doesn't chmod the link target's dir: $(cat "$W/err")"
+}
+
+test_reload_fails() {
+	write_cfg "$PASSWORDLESS"
+	touch "$W/reload_fail"
+	run_ctmux ensure
+	assert_one_actionable_line 'reload-config' || return 1
+	local pw
+	pw=$(json_get 'd["automation"]["socketPassword"]')
+	! grep -qF "$pw" "$W/out" "$W/err" || fail "password printed"
+}
+
+test_present_password_rejected() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw beef
+	run_ctmux ensure
+	assert_one_actionable_line 'rejected' || return 1
+	! grep -q cafe "$W/out" "$W/err" || fail "password printed"
+}
+
+test_socket_unreachable() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	touch "$W/socket_down"
+	run_ctmux ensure
+	assert_one_actionable_line 'not reachable'
 }
 
 # ---------- runner ----------
