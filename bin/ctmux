@@ -234,16 +234,61 @@ ensure_cmux_running() {
 	return 1
 }
 
+# Cross-process lock for a section where two ctmux runs must not overlap (the
+# socket-password heal below). Right after a
+# reboot the login agent and a manual `ctmux` can both see the password
+# missing: whoever holds the lock generates, loads and verifies a password,
+# and the next run then finds it in cmux.json and only pings (without the
+# lock each would write its own random password and the first one's ping
+# would fail with a false "rejected" — https://github.com/alex-mextner/ctmux-cli/issues/4).
+# It is an flock on fd 9 (a fixed number: macOS's /bin/bash 3.2 has no
+# `{var}>` fd allocation): the kernel drops it when its holder dies, so a
+# ctmux that dies mid-section leaves no stale lock behind. For that to hold,
+# no child of a locked section may inherit fd 9 — a stuck `cmux` child would
+# keep the lock alive after its parent died — so every command run there
+# (cmux, sleep, seq) gets `9>&-`.
+# An fd 9 inherited from the caller is simply replaced (this process's copy
+# only). Never fatal — if the lock file can't be opened (unwritable or missing
+# config dir), python3 is missing, or a
+# holder hangs past LOCK_WAIT_S (far longer than a healthy section takes: 20
+# rounds of a ~0.3 s pause plus a ping), the run goes on unlocked and the
+# section reports its own actionable error as before. A hung holder must not
+# lock every later ctmux out. lock_take never returns non-zero (callers run
+# under `set -e`); one lock at a time, always paired with lock_release.
+LOCK_WAIT_S=90
+LOCK_HELD=""
+lock_take() { # $1: lock file
+	[ -z "$LOCK_HELD" ] || return 0
+	{ exec 9>>"$1"; } 2>/dev/null || return 0
+	LOCK_HELD=1
+	python3 - "$LOCK_WAIT_S" <<'PY' 2>/dev/null || true
+import fcntl, sys, time
+deadline = time.monotonic() + float(sys.argv[1])
+while True:
+	try:
+		fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+		break
+	except OSError:
+		if time.monotonic() > deadline:
+			break
+		time.sleep(0.1)
+PY
+}
+lock_release() {
+	[ -z "$LOCK_HELD" ] || exec 9>&-
+	LOCK_HELD=""
+}
+
 # Every failure prints exactly one actionable line (what is wrong + the fix
 # command) instead of cmux's raw auth_required error.
-ensure_socket_auth() {
+ensure_socket_auth_locked() {
 	local rc out="" reload_failed=""
-	for _ in $(seq 1 20); do
+	for _ in $(seq 1 20 9>&-); do
 		# Re-read every round: right after `open -a cmux` the app may still
 		# be about to drop the password ctmux just read (#8372 happens
 		# during its launch).
 		rc=0
-		CMUX_PW=$(cmux_cfg heal) || rc=$?
+		CMUX_PW=$(cmux_cfg heal 9>&-) || rc=$?
 		if [ "$rc" -eq "$CMUX_CFG_HEALED" ]; then
 			# cmux watches cmux.json and normally picks the new password up
 			# by itself; reload-config makes sure. Not fatal by itself: the
@@ -251,24 +296,32 @@ ensure_socket_auth() {
 			# cmux terminal's socket capability: in password mode with the
 			# password gone, cmux 0.64.25 rejects that too.)
 			reload_failed=""
-			cx reload-config >/dev/null 2>&1 || reload_failed=1
+			cx reload-config >/dev/null 2>&1 9>&- || reload_failed=1
 		elif [ "$rc" -ne 0 ]; then
 			return 1 # cmux_cfg already printed the actionable line
 		fi
-		out=$(cx ping 2>&1) && return 0
-		sleep 0.3
+		out=$(cx ping 2>&1 9>&-) && return 0
+		sleep 0.3 9>&-
 	done
 	# Relaunching makes cmux load cmux.json afresh; if the launch drops the
 	# password again, the next ctmux ensure heals it.
 	local relaunch="quit and reopen cmux (osascript -e 'quit app \"cmux\"'; open -a cmux), then ctmux ensure"
 	if [ -n "$reload_failed" ]; then
 		echo "ctmux: wrote a new automation.socketPassword to ~/.config/cmux/cmux.json, but cmux hasn't picked it up and \`cmux reload-config\` failed — fix: $relaunch" >&2
-	elif printf '%s' "$out" | grep -qiE 'auth_required|auth_unconfigured|authentication required|invalid password|no socket password'; then
+	elif printf '%s' "$out" | grep -qiE 'auth_required|auth_unconfigured|authentication required|invalid password|no socket password' 9>&-; then
 		echo "ctmux: cmux rejected the socket password in ~/.config/cmux/cmux.json (it is running with a different one) — fix: $relaunch" >&2
 	else
 		echo "ctmux: cmux socket not reachable (\`cmux ping\` keeps failing) — fix: open -a cmux, wait for its window, then ctmux ensure" >&2
 	fi
 	return 1
+}
+
+ensure_socket_auth() {
+	local rc=0
+	lock_take "$(dirname "$CMUX_CFG")/.ctmux-heal.lock"
+	ensure_socket_auth_locked || rc=$?
+	lock_release
+	return "$rc"
 }
 
 # True once a control-mode client is actually attached and mirroring $1.
