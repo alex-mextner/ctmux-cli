@@ -86,7 +86,12 @@ ctmux ensure      # idempotent mirror-check only (used by the LaunchAgent)
   runs `cmux reload-config`. It never restores the password from cmux's
   `cmux.*.bak` backups. This self-heal is a workaround and can be removed
   once that upstream bug is fixed. Anything it can't fix is reported as one
-  line naming the problem and the fix command.
+  line naming the problem and the fix command. Overlapping runs (the login
+  agent and a manual `ctmux`) are serialized by an `flock` on
+  `~/.config/cmux/.ctmux-heal.lock`, so they generate and load one password;
+  the kernel drops the lock with its holder, so a killed ctmux leaves nothing
+  stale behind. A holder that hangs for over 90 s is not waited for any
+  longer (a hung ctmux must not lock the others out).
 - The "Remote tmux" beta flag has no `cmux.json` key — it's a UserDefaults
   key (`com.cmuxterm.app`, `remoteTmux.beta.enabled`), read synchronously per
   call. `ctmux` flips it itself the first time it hits the "disabled" error;

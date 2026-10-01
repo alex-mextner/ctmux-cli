@@ -42,6 +42,9 @@ new_world() {
 	cat >"$W/bin/cmux" <<'SH'
 #!/bin/bash
 echo "cmux $1" >>"$W/calls"
+# fd 9 is ctmux's heal lock: a cmux child that inherits it could keep the lock
+# alive after ctmux itself died.
+{ : >&9; } 2>/dev/null && echo "$*" >>"$W/fd9_leaks"
 cfg_pw() {
 	python3 - "$HOME/.config/cmux/cmux.json" <<'PY'
 import json, re, sys
@@ -56,6 +59,13 @@ PY
 [ -f "$W/app_watches_cfg" ] && cfg_pw >"$W/app_pw"
 if [ "$1" = reload-config ]; then
 	[ -f "$W/reload_fail" ] && { echo "Error: reload failed" >&2; exit 1; }
+	# $W/gate_reload: hold the reload (the app has not loaded the new password
+	# yet) until the test creates $W/release_reload — a deterministic window in
+	# which a second ctmux run can overlap the first one's heal.
+	if [ -f "$W/gate_reload" ]; then
+		: >"$W/reload_started"
+		for _ in $(seq 1 400); do [ -f "$W/release_reload" ] && break; /bin/sleep 0.05; done
+	fi
 	cfg_pw >"$W/app_pw"
 	exit 0
 fi
@@ -105,6 +115,29 @@ run_ctmux() {
 		env -u CMUX_SOCKET_PASSWORD -u CMUX_SOCKET_CAPABILITY \
 		"$CTMUX" "$@" >"$W/out" 2>"$W/err"
 	RC=$?
+}
+
+# Same fake world as run_ctmux, but in the background, with its own
+# out/err/rc files ($W/out.NAME, $W/err.NAME, $W/rc.NAME); `wait` joins it.
+run_ctmux_bg() {
+	local name="$1"
+	shift
+	(
+		HOME="$W/home" PATH="$TEST_PATH" CMUX_SOCKET_PATH="$W/cmux.sock" \
+			env -u CMUX_SOCKET_PASSWORD -u CMUX_SOCKET_CAPABILITY \
+			"$CTMUX" "$@" >"$W/out.$name" 2>"$W/err.$name"
+		echo $? >"$W/rc.$name"
+	) &
+}
+
+# Real sleeps on purpose: the stub dir shadows `sleep` with a no-op.
+wait_for_file() { # path seconds
+	local i
+	for ((i = 0; i < $2 * 20; i++)); do
+		[ -e "$1" ] && return 0
+		/bin/sleep 0.05
+	done
+	return 1
 }
 
 write_cfg() { printf '%s\n' "$1" >"$CFG"; chmod 600 "$CFG"; }
@@ -371,9 +404,135 @@ test_socket_unreachable() {
 	assert_one_actionable_line 'not reachable'
 }
 
+# ---------- #4: concurrent heals ----------
+
+HEAL_LOCK_REL=".config/cmux/.ctmux-heal.lock"
+
+# The login agent and a manual `ctmux` both see the password missing. The
+# second must neither generate a second password nor ping with one cmux has
+# not loaded yet: it waits for the first run's heal to finish.
+test_concurrent_ensure_runs_agree_on_one_password() {
+	write_cfg "$PASSWORDLESS"
+	touch "$W/gate_reload"
+	run_ctmux_bg a ensure
+	wait_for_file "$W/reload_started" 10 || fail "run a never reached reload-config: $(cat "$W/err.a")" || return 1
+	run_ctmux_bg b ensure
+	# b has passed its cmux-running check (the second pgrep) and is about to
+	# authenticate: it is either done soon (no lock) or queued behind a's lock.
+	for _ in $(seq 1 200); do
+		[ "$(calls | grep -c '^pgrep')" -ge 2 ] && break
+		/bin/sleep 0.05
+	done
+	# Without the lock b runs its whole auth loop now and ends on a false
+	# "rejected" (rc.b appears within a second or two); with it b is queued
+	# behind a and rc.b stays absent until a lets go. Either way, a is released
+	# only after b had its chance to fail.
+	for _ in $(seq 1 100); do
+		[ -e "$W/rc.b" ] && break
+		/bin/sleep 0.05
+	done
+	touch "$W/release_reload"
+	wait
+	[ "$(cat "$W/rc.a")" = 0 ] || fail "run a exit $(cat "$W/rc.a"): $(cat "$W/err.a")" || return 1
+	[ "$(cat "$W/rc.b")" = 0 ] || fail "run b exit $(cat "$W/rc.b"): $(cat "$W/err.b")" || return 1
+	[ "$(cat "$W/app_pw")" = "$(json_get 'd["automation"]["socketPassword"]')" ] || fail "file and loaded password differ" || return 1
+	[ "$(calls | grep -c '^cmux reload-config$')" = 1 ] || fail "password generated or loaded more than once: $(calls)" || return 1
+	! grep -qF "$(cat "$W/app_pw")" "$W"/out.* "$W"/err.* || fail "password printed"
+}
+
+# What ctmux runs under the lock must not inherit it: a hung cmux child would
+# keep the flock alive after its parent died.
+test_children_of_the_locked_section_do_not_inherit_the_lock() {
+	# Every command of the locked section, not just cmux: the pause between two
+	# rounds (sleep) must not hold the lock either. A launch-time password drop
+	# after the first ping makes ctmux run a second round, so it does sleep.
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	touch "$W/drop_pw_on_first_ping"
+	cat >"$W/bin/sleep" <<'SH'
+#!/bin/bash
+echo "sleep $*" >>"$W/sleeps"
+{ : >&9; } 2>/dev/null && echo "sleep $*" >>"$W/fd9_leaks"
+exit 0
+SH
+	run_ctmux ensure
+	[ "$RC" -eq 0 ] || fail "exit $RC: $(cat "$W/err")" || return 1
+	[ -s "$W/sleeps" ] || fail "the scenario never reached a sleep" || return 1
+	[ ! -s "$W/fd9_leaks" ] || fail "a command ran with the lock fd open: $(cat "$W/fd9_leaks")"
+}
+
+# A ctmux killed in the middle of a heal must not block later runs: the lock
+# is an flock, which the kernel drops with its holder, so there is no stale
+# lock to detect.
+test_killed_lock_holder_does_not_block_later_runs() {
+	write_cfg "$PASSWORDLESS"
+	python3 - "$W/home/$HEAL_LOCK_REL" "$W/holder_ready" <<'PY' &
+import fcntl, sys, time
+f = open(sys.argv[1], "a")
+fcntl.flock(f, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(600)
+PY
+	local holder=$!
+	wait_for_file "$W/holder_ready" 10 || { kill "$holder"; fail "holder never took the lock"; return 1; }
+	kill -9 "$holder"
+	wait "$holder" 2>/dev/null
+	SECONDS=0
+	run_ctmux ensure
+	assert_healed || return 1
+	[ "$SECONDS" -lt 10 ] || fail "run blocked ${SECONDS}s behind a dead lock holder"
+}
+
+# A caller that already has fd 9 open (a wrapper script) must not switch the
+# lock off: ctmux takes its own fd 9.
+test_inherited_fd9_does_not_disable_the_lock() {
+	write_cfg "$PASSWORDLESS"
+	python3 - "$W/home/$HEAL_LOCK_REL" "$W/holder_ready" "$W/holder_done" <<'PY' &
+import fcntl, sys, time
+f = open(sys.argv[1], "a")
+fcntl.flock(f, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(2)
+open(sys.argv[3], "w").close()
+PY
+	wait_for_file "$W/holder_ready" 10 || fail "holder never took the lock" || return 1
+	HOME="$W/home" PATH="$TEST_PATH" CMUX_SOCKET_PATH="$W/cmux.sock" \
+		env -u CMUX_SOCKET_PASSWORD -u CMUX_SOCKET_CAPABILITY \
+		"$CTMUX" ensure 9>/dev/null >"$W/out" 2>"$W/err"
+	RC=$?
+	local done_before_exit=""
+	[ -e "$W/holder_done" ] && done_before_exit=1
+	wait
+	assert_healed || return 1
+	[ -n "$done_before_exit" ] || fail "ctmux healed while the lock was held (inherited fd 9 disabled it)"
+}
+
+# The lock really serializes: a run that starts while another process holds
+# it does not finish before the holder lets go.
+test_live_lock_holder_is_waited_for() {
+	write_cfg "$PASSWORDLESS"
+	python3 - "$W/home/$HEAL_LOCK_REL" "$W/holder_ready" "$W/holder_done" <<'PY' &
+import fcntl, sys, time
+f = open(sys.argv[1], "a")
+fcntl.flock(f, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(2)
+open(sys.argv[3], "w").close()
+PY
+	wait_for_file "$W/holder_ready" 10 || fail "holder never took the lock" || return 1
+	run_ctmux ensure
+	local done_before_exit=""
+	[ -e "$W/holder_done" ] && done_before_exit=1
+	wait
+	assert_healed || return 1
+	[ -n "$done_before_exit" ] || fail "ctmux finished its heal while the lock was still held"
+}
+
 # ---------- runner ----------
 
+# bash tests/ctmux_test.sh [test_name...] runs only the named tests.
 for t in $(declare -F | awk '{print $3}' | grep '^test_'); do
+	if [ "$#" -gt 0 ] && [[ " $* " != *" $t "* ]]; then continue; fi
 	new_world
 	# Subshell: a test can't leak state into the next. (`set -e` would be
 	# ignored in an `if` condition anyway, so every assertion returns 1.)
