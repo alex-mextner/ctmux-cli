@@ -15,9 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - run: bash tests/ctmux_test.sh
+      - run: bash tests/install_test.sh
 
   shellcheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - run: shellcheck bin/ctmux tests/ctmux_test.sh
+      - run: shellcheck bin/ctmux install.sh tests/ctmux_test.sh tests/install_test.sh

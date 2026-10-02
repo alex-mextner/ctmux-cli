@@ -25,9 +25,15 @@
 #                     "+ new session" to create one
 #   ctmux new [name]  create a new tmux session (auto-named if omitted),
 #                     ensure the mirror, focus it
-#   ctmux ensure      idempotent mirror-check only, no picker (still opens
+#   ctmux ensure [--retry-for SECONDS]
+#                     idempotent mirror-check only, no picker (still opens
 #                     cmux if it isn't running — the login LaunchAgent relies
-#                     on this to bring cmux up automatically)
+#                     on this to bring cmux up automatically); with
+#                     --retry-for a failed attempt is repeated every 15s until
+#                     it works or SECONDS have passed
+#   ctmux watch       what the cmux.json LaunchAgent runs: like ensure, but
+#                     only when cmux is already running, and without waiting
+#                     for tmux
 set -euo pipefail
 
 # launchd (the login LaunchAgent) runs with a minimal PATH that lacks
@@ -205,10 +211,20 @@ EOF
 # LaunchAgent fires before rig's does and mirrors nothing. Only meaningful at
 # login time (the bare `ensure` path); irrelevant once a specific session is
 # already known to exist (new_session skips it — see ensure_mirror).
+#
+# Polled by absolute path, never as a bare `tmux`: tmux-continuum decides
+# whether to restore the saved layout at server start by counting the user's
+# processes whose command line starts with "tmux" (another_tmux_server_running_
+# on_startup) and skips the restore when more than one besides the server
+# exists — a bare `tmux has-session` loop here could make rig's boot restore
+# skip. `type -P` ignores shell functions and aliases.
+tmux_bin() { type -P tmux || echo tmux; }
+
 wait_for_tmux_session() {
-	local session="$1"
+	local session="$1" tmux
+	tmux=$(tmux_bin)
 	for _ in $(seq 1 60); do
-		tmux has-session -t "=$session" 2>/dev/null && return 0
+		"$tmux" has-session -t "=$session" 2>/dev/null && return 0
 		sleep 1
 	done
 	echo "ctmux: tmux session '$session' never appeared after 60s wait." >&2
@@ -238,7 +254,7 @@ ensure_cmux_running() {
 # command) instead of cmux's raw auth_required error.
 ensure_socket_auth() {
 	local rc out="" reload_failed=""
-	for _ in $(seq 1 20); do
+	for _ in $(seq 1 "${CTMUX_AUTH_ROUNDS:-20}"); do
 		# Re-read every round: right after `open -a cmux` the app may still
 		# be about to drop the password ctmux just read (#8372 happens
 		# during its launch).
@@ -425,6 +441,43 @@ picker() {
 	launch_and_focus "$session"
 }
 
+# `ctmux ensure --retry-for SECONDS`: the login agent's form. A boot under
+# load can make the first attempt fail for reasons that pass on their own
+# (tmux 'main' not up yet, cmux's socket not accepting yet), and the agent runs
+# once per login, so retry here — bounded, so a persistent problem (Remote Login
+# off, a broken cmux.json) ends instead of relaunching cmux forever.
+ensure_with_retry() {
+	local budget="$1" deadline attempt=1
+	deadline=$(($(date +%s) + budget))
+	until CTMUX_RESUME=1 ensure_mirror; do
+		if [ "$(date +%s)" -ge "$deadline" ]; then
+			return 1
+		fi
+		attempt=$((attempt + 1))
+		echo "ctmux: attempt $((attempt - 1)) failed, retrying in 15s (attempt $attempt, up to ${budget}s in total)" >&2
+		sleep 15
+	done
+}
+
+# `ctmux watch`: run by the LaunchAgent that watches cmux.json. cmux rewrites
+# that file on every launch — and drops the socket password doing so
+# (cmux#8372) — so a cmux restart without a reboot needs the same recovery as
+# a login: heal the password, re-run the restores that failed meanwhile, bring
+# the mirror back. Unlike `ensure` it never launches cmux (a cmux the user quit
+# would be reopened by its own shutdown rewriting the file) and never waits for
+# tmux (a tmux that is down is rig's to bring up; the next trigger mirrors it).
+# cmux may still be starting when the file changes, so it waits longer for the
+# socket than an interactive ensure does.
+watch_cmux() {
+	local canonical
+	cmux_app_running || return 0
+	CTMUX_AUTH_ROUNDS=100 ensure_socket_auth || return 1
+	resume_stalled_surfaces || true
+	canonical=$(canonical_session)
+	"$(tmux_bin)" has-session -t "=$canonical" 2>/dev/null || return 0
+	ensure_mirror "$canonical"
+}
+
 # Sourceable (tests load the functions): dispatch only when executed.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
@@ -438,14 +491,25 @@ case "$cmd" in
 		new_session "${1:-}"
 		;;
 	ensure)
-		ensure_mirror
+		shift || true
+		retry_for=0
+		if [ "${1:-}" = --retry-for ]; then
+			retry_for="${2:-}"
+			[[ "$retry_for" =~ ^[0-9]+$ ]] || { echo "ctmux: --retry-for needs a number of seconds" >&2; exit 1; }
+			shift 2
+		fi
+		[ "$#" -eq 0 ] || { echo "ctmux: unexpected argument '$1' (usage: ctmux ensure [--retry-for SECONDS])" >&2; exit 1; }
+		ensure_with_retry "$retry_for"
+		;;
+	watch)
+		watch_cmux
 		;;
 	"")
 		ensure_mirror
 		open -a cmux
 		;;
 	*)
-		echo "ctmux: unknown command '$cmd' (try: ls, new [name], ensure, or no args)" >&2
+		echo "ctmux: unknown command '$cmd' (try: ls, new [name], ensure [--retry-for SECONDS], watch, or no args)" >&2
 		exit 1
 		;;
 esac

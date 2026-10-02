@@ -93,9 +93,19 @@ touch "$W/cmux_up"
 SH
 	printf '#!/bin/bash\nexit 0\n' >"$W/bin/nc"
 	printf '#!/bin/bash\nexit 0\n' >"$W/bin/ssh"
-	printf '#!/bin/bash\nexit 0\n' >"$W/bin/tmux"
+	printf '#!/bin/bash\n[ -f "$W/tmux_down" ] && exit 1\nexit 0\n' >"$W/bin/tmux"
 	printf '#!/bin/bash\nexit 0\n' >"$W/bin/defaults"
-	printf '#!/bin/bash\nexit 0\n' >"$W/bin/sleep"
+	# The login retry pause (15 s) is the only one that matters to a test:
+	# it advances the fake clock (the socket comes up) and takes a moment of
+	# real time so a retry loop is not a busy spin.
+	cat >"$W/bin/sleep" <<'SH'
+#!/bin/bash
+if [ "$1" = 15 ]; then
+	[ -f "$W/up_after_retry_pause" ] && rm -f "$W/socket_down" "$W/up_after_retry_pause"
+	/bin/sleep 0.2
+fi
+exit 0
+SH
 	chmod +x "$W/bin/"*
 	export W
 }
@@ -368,6 +378,91 @@ test_socket_unreachable() {
 	app_has_pw cafe
 	touch "$W/socket_down"
 	run_ctmux ensure
+	assert_one_actionable_line 'not reachable'
+}
+
+# ---------- #8: login retry, watcher ----------
+
+test_ensure_retries_a_failed_attempt_until_it_works() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	touch "$W/socket_down" "$W/up_after_retry_pause"
+	run_ctmux ensure --retry-for 60
+	[ "$RC" -eq 0 ] || fail "exit $RC: $(cat "$W/err")" || return 1
+	calls | grep -qx 'cmux ssh-tmux' || fail "mirror not run after the retry: $(calls)" || return 1
+	grep -q 'retrying in 15s' "$W/err" || fail "no retry line: $(cat "$W/err")"
+}
+
+test_ensure_retry_gives_up_when_the_budget_is_spent() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	touch "$W/socket_down"
+	SECONDS=0
+	run_ctmux ensure --retry-for 1
+	[ "$RC" -ne 0 ] || fail "exit 0 although cmux never answered" || return 1
+	[ "$SECONDS" -lt 20 ] || fail "kept retrying for ${SECONDS}s"
+}
+
+test_ensure_without_retry_fails_after_one_attempt() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	touch "$W/socket_down"
+	run_ctmux ensure
+	[ "$RC" -ne 0 ] || fail "exit 0 although cmux never answered" || return 1
+	! grep -q 'retrying' "$W/err" || fail "retried without --retry-for: $(cat "$W/err")"
+}
+
+test_ensure_rejects_a_bad_retry_budget() {
+	run_ctmux ensure --retry-for soon
+	[ "$RC" -ne 0 ] || fail "exit 0 for a bad budget" || return 1
+	grep -q -- '--retry-for needs a number' "$W/err" || fail "stderr: $(cat "$W/err")"
+}
+
+# The wait for tmux 'main' must not show up as a bare `tmux` process (see
+# tmux_bin). A shell function named tmux stands in for "the bare name".
+test_waiting_for_tmux_never_runs_a_bare_tmux() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	# shellcheck disable=SC2329 # only ever called by ctmux, through the exported env
+	tmux() { echo "bare tmux $*" >>"$W/bare_tmux"; }
+	export -f tmux
+	run_ctmux ensure
+	unset -f tmux
+	[ "$RC" -eq 0 ] || fail "exit $RC: $(cat "$W/err")" || return 1
+	[ ! -e "$W/bare_tmux" ] || fail "ran a bare tmux: $(cat "$W/bare_tmux")"
+}
+
+# cmux.json changes also when the user quits cmux; watching must not bring it back.
+test_watch_never_launches_cmux() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	rm -f "$W/cmux_up"
+	run_ctmux watch
+	[ "$RC" -eq 0 ] || fail "exit $RC: $(cat "$W/err")" || return 1
+	! calls | grep -q '^open' || fail "launched cmux: $(calls)" || return 1
+	! calls | grep -q '^cmux' || fail "talked to a cmux that is not running: $(calls)"
+}
+
+test_watch_heals_and_mirrors_a_running_cmux() {
+	write_cfg "$PASSWORDLESS"
+	run_ctmux watch
+	assert_healed
+}
+
+test_watch_heals_even_when_tmux_is_down_but_does_not_mirror() {
+	write_cfg "$PASSWORDLESS"
+	touch "$W/tmux_down"
+	run_ctmux watch
+	[ "$RC" -eq 0 ] || fail "exit $RC: $(cat "$W/err")" || return 1
+	[[ "$(json_get 'd["automation"]["socketPassword"]')" =~ ^[0-9a-f]{48}$ ]] || fail "password not healed" || return 1
+	! calls | grep -qx 'cmux ssh-tmux' || fail "mirrored a tmux that is down"
+}
+
+# A running cmux that never opens its socket is a failure of the watcher, not a hang.
+test_watch_reports_a_socket_that_never_comes_up() {
+	write_cfg '{"automation":{"socketControlMode":"password","socketPassword":"cafe"}}'
+	app_has_pw cafe
+	touch "$W/socket_down"
+	run_ctmux watch
 	assert_one_actionable_line 'not reachable'
 }
 

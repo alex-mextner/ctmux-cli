@@ -25,10 +25,22 @@ mapping today without forking cmux or Ghostty.
 ./install.sh
 ```
 
-Symlinks `bin/ctmux` onto `~/.local/bin/ctmux`. The login LaunchAgent (auto
-re-mirror at login) is opt-in per machine — off by default. To enable it on a
-machine, set `enabled: true` on its `tools.items.ctmux` entry in
-`~/.config/rig/config.yaml`:
+Symlinks `bin/ctmux` onto `~/.local/bin/ctmux`. The two LaunchAgents are
+opt-in per machine — off by default:
+
+- `com.ultra.ctmux-ensure` runs `ctmux ensure --retry-for 600` at login: heals
+  the cmux socket password, brings the mirror up, re-runs the pane restores
+  that failed meanwhile. A boot under load can make the first attempt fail
+  (tmux `main` not up yet, cmux's socket not accepting yet), so a failed
+  attempt is repeated every 15 s for up to 10 minutes — bounded on purpose, a
+  persistent problem must not keep relaunching cmux.
+- `com.ultra.ctmux-watch` runs `ctmux watch` whenever
+  `~/.config/cmux/cmux.json` changes. cmux rewrites that file on every launch
+  (dropping the password), so this is the same recovery after a cmux restart
+  without a reboot. It only acts while cmux is running and never launches it.
+
+To enable them on a machine, set `enabled: true` on its `tools.items.ctmux`
+entry in `~/.config/rig/config.yaml`:
 
 ```yaml
 tools:
@@ -39,7 +51,10 @@ tools:
 ```
 
 then re-run `install.sh`. `enabled` is a standard `tools.items.<name>` key,
-so `rig apply`/`rig status` validate the config as usual.
+so `rig apply`/`rig status` validate the config as usual. `install.sh` is
+idempotent: an agent whose plist is unchanged and already loaded is left
+alone, and a changed one is reloaded (which runs it once, so it can open cmux).
+`CTMUX_LAUNCHAGENTS=on|off` overrides the rig config for a one-off install.
 
 ## Usage
 
@@ -47,7 +62,9 @@ so `rig apply`/`rig status` validate the config as usual.
 ctmux            # ensure the mirror is up, launch/focus cmux
 ctmux ls          # fzf picker over session:window pairs
 ctmux new [name]  # create a new tmux session (auto-named if omitted), mirror it
-ctmux ensure      # idempotent mirror-check only (used by the LaunchAgent)
+ctmux ensure      # idempotent mirror-check only
+ctmux ensure --retry-for 600   # the same, repeated every 15 s for up to 10 min (login agent)
+ctmux watch       # the cmux.json agent: like ensure, but only if cmux runs, never launches it
 ```
 
 ## Prerequisites

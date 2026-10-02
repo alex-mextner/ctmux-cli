@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.ultra.ctmux-watch</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/ultra/.local/bin/ctmux</string>
+		<string>watch</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<!-- cmux rewrites cmux.json on every launch (and drops socketPassword,
+	     manaflow-ai/cmux#8372): that is the cue to heal, resume and mirror.
+	     Watch the FILE, not ~/.config/cmux: a directory watch also fires for
+	     every append to a file in it. The log lives outside for that reason. -->
+	<key>WatchPaths</key>
+	<array>
+		<string>/Users/ultra/.config/cmux/cmux.json</string>
+	</array>
+	<key>ThrottleInterval</key>
+	<integer>20</integer>
+	<key>StandardOutPath</key>
+	<string>/Users/ultra/.local/state/ctmux/watch.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/ultra/.local/state/ctmux/watch.log</string>
+</dict>
+</plist>
