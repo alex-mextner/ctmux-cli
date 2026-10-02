@@ -28,6 +28,10 @@
 #   ctmux ensure      idempotent mirror-check only, no picker (still opens
 #                     cmux if it isn't running — the login LaunchAgent relies
 #                     on this to bring cmux up automatically)
+#   ctmux resume [--dry-run] [--surface REF]...
+#                     re-run `cmux restore` in panes where cmux's auto-resume
+#                     failed (auth_required, tmux not up yet); ensure and bare
+#                     ctmux do this too once they have a working password
 set -euo pipefail
 
 # launchd (the login LaunchAgent) runs with a minimal PATH that lacks
@@ -234,8 +238,8 @@ ensure_cmux_running() {
 	return 1
 }
 
-# Cross-process lock for a section where two ctmux runs must not overlap (the
-# socket-password heal below). Right after a
+# Cross-process lock for the sections where two ctmux runs must not overlap
+# (the socket-password heal below, and the stalled-pane resume). Right after a
 # reboot the login agent and a manual `ctmux` can both see the password
 # missing: whoever holds the lock generates, loads and verifies a password,
 # and the next run then finds it in cmux.json and only pings (without the
@@ -257,11 +261,16 @@ ensure_cmux_running() {
 # under `set -e`); one lock at a time, always paired with lock_release.
 LOCK_WAIT_S=90
 LOCK_HELD=""
-lock_take() { # $1: lock file
-	[ -z "$LOCK_HELD" ] || return 0
+# LOCK_ACQUIRED: 1 only when the flock really is ours. The heal goes on
+# without it (see above); the resume does not, since two unlocked scans would
+# both type into the same pane.
+LOCK_ACQUIRED=""
+lock_take() { # $1: lock file, $2: seconds to wait for it (default LOCK_WAIT_S)
+	LOCK_ACQUIRED=""
+	[ -z "$LOCK_HELD" ] || { LOCK_ACQUIRED=1; return 0; }
 	{ exec 9>>"$1"; } 2>/dev/null || return 0
 	LOCK_HELD=1
-	python3 - "$LOCK_WAIT_S" <<'PY' 2>/dev/null || true
+	python3 - "${2:-$LOCK_WAIT_S}" <<'PY' 2>/dev/null && LOCK_ACQUIRED=1 || true
 import fcntl, sys, time
 deadline = time.monotonic() + float(sys.argv[1])
 while True:
@@ -270,13 +279,14 @@ while True:
 		break
 	except OSError:
 		if time.monotonic() > deadline:
-			break
+			sys.exit(1)
 		time.sleep(0.1)
 PY
 }
 lock_release() {
 	[ -z "$LOCK_HELD" ] || exec 9>&-
 	LOCK_HELD=""
+	LOCK_ACQUIRED=""
 }
 
 # Every failure prints exactly one actionable line (what is wrong + the fix
@@ -320,6 +330,269 @@ ensure_socket_auth() {
 	local rc=0
 	lock_take "$(dirname "$CMUX_CFG")/.ctmux-heal.lock"
 	ensure_socket_auth_locked || rc=$?
+	lock_release
+	return "$rc"
+}
+
+# cmux's auto-resume types `cmux restore <kind> <id>` into every restored
+# terminal during the app launch. That launch also drops the socket password
+# (cmux#8372), so the command fails once with auth_required — and for a
+# `tmux` binding it can run before the tmux server is back — and the pane sits
+# at a shell showing the error (https://github.com/alex-mextner/ctmux-cli/issues/5).
+# Once ctmux has a working password (and, for ensure, tmux is up) it re-runs
+# the restore in exactly those panes, by typing `cmux restore --surface REF`.
+#
+# A pane is touched only when ALL of these hold:
+#   - cmux lists its surface as a terminal and reports nothing running in it
+#     (no process, no foreground process group): an idle shell, never a tmux
+#     client or an agent;
+#   - the surface has a resume binding (cmux's own record, which also decides
+#     WHAT is restored: ctmux never types a command it read off the screen);
+#   - the newest output on its screen is the typed `cmux restore <kind> <id>`
+#     of that very binding followed by an auth error (a tmux binding also by
+#     tmux's "no server"/"can't find session"), then at most a prompt;
+#   - for an agent binding, no process anywhere has the session id in its
+#     command line: resuming a session that runs elsewhere would put a second
+#     writer on it;
+#   - the previous line is not ctmux's own `--surface` retry (no retry loop).
+# Options: --dry-run (report only), --surface REF (limit to that pane, repeat
+# for more), --explicit (the `ctmux resume` subcommand: report problems).
+# Prints one line per pane acted on or deliberately skipped.
+scan_stalled_surfaces() {
+	CMUX_PW="$CMUX_PW" python3 - "$@" <<'PY'
+import hashlib, json, os, re, subprocess, sys, time
+
+dry_run = explicit = False
+only = set()
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+	a = args[i]
+	if a == "--dry-run":
+		dry_run = True
+	elif a == "--explicit":
+		explicit = True
+	elif a == "--surface" and i + 1 < len(args):
+		i += 1
+		only.add(args[i])
+	else:
+		print(f"ctmux: unknown resume option '{a}' (try: --dry-run, --surface REF)", file=sys.stderr)
+		sys.exit(2)
+	i += 1
+
+env = dict(os.environ, CMUX_SOCKET_PASSWORD=os.environ.pop("CMUX_PW", ""))
+
+def cmux(*a):
+	try:
+		p = subprocess.run(["cmux", *a], env=env, capture_output=True, text=True, timeout=20)
+	except (OSError, subprocess.SubprocessError):
+		return None
+	return p.stdout if p.returncode == 0 else None
+
+def jcmux(*a):
+	out = cmux(*a)
+	try:
+		return json.loads(out) if out else None
+	except ValueError:
+		return None
+
+def walk(x, pred, out):
+	if isinstance(x, dict):
+		if pred(x):
+			out.append(x)
+		for v in x.values():
+			walk(v, pred, out)
+	elif isinstance(x, list):
+		for v in x:
+			walk(v, pred, out)
+	return out
+
+tree = jcmux("tree", "--all", "--json")
+top = jcmux("--json", "top", "--all", "--processes")
+if tree is None or top is None:
+	if explicit:
+		print("ctmux: cmux didn't list its terminals (cmux tree/top failed)", file=sys.stderr)
+		sys.exit(1)
+	sys.exit(0)
+
+# Idle = cmux lists the surface and reports nothing running in it. A surface
+# cmux didn't report on is not idle (fail closed).
+def idle_refs(snapshot):
+	return {s["ref"] for s in walk(snapshot, lambda d: d.get("kind") == "surface" and isinstance(d.get("ref"), str), [])
+	        if not s.get("processes") and not s.get("foreground_pgids")}
+
+idle = idle_refs(top)
+refs = [s["ref"] for s in walk(tree, lambda d: d.get("type") == "terminal" and isinstance(d.get("ref"), str), [])]
+
+REF = re.compile(r"surface:[0-9]+")
+TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@:-]{0,127}")
+AUTH = re.compile(r"auth_required|authentication required|no socket password is configured", re.I)
+TMUX_DOWN = re.compile(r"no server running|error connecting to|failed to connect to server|no sessions|can't find session", re.I)
+
+PROMPT = re.compile(r"[>$%#❯➜»]\s*$")
+NOT_TOKEN_BEFORE = r"(?<![A-Za-z0-9._@:-])"
+NOT_TOKEN_AFTER = r"(?![A-Za-z0-9._@:-])"
+
+def newest_failure(kind, cid, screen):
+	"""'stalled', 'retried' (our own retry failed too) or None."""
+	lines = [l for l in screen.splitlines() if l.strip()][-8:]
+	pats = [AUTH] + ([TMUX_DOWN] if kind == "tmux" else [])
+	for n in range(len(lines) - 1, 0, -1):
+		if not any(p.search(lines[n]) for p in pats):
+			continue
+		typed, after = lines[n - 1], lines[n + 1:]
+		# After the error: nothing, or one empty prompt (a line ending in a
+		# prompt character — text the user has typed there is not an empty one).
+		if len(after) > 1 or (after and not PROMPT.search(after[0])):
+			return None
+		if "cmux restore --surface" in typed:
+			return "retried"
+		return "stalled" if re.search(NOT_TOKEN_BEFORE + re.escape(f"cmux restore {kind} {cid}") + NOT_TOKEN_AFTER, typed) else None
+	return None
+
+# What this tool remembers between runs, in CTMUX_RESUME_MARKER:
+#   sent   ref -> hash of the screen it typed the restore into. The typed
+#          command shows up on the screen only once cmux has echoed it; until
+#          then (or forever, if it never does) the pane still looks like the
+#          original failure, and the unchanged screen is what says "already
+#          handled". Any change of the screen (the echo, a new launch) ends it.
+#   claims "<kind> <id>" -> epoch. The resumed agent may not be in ps yet when
+#          the next run starts, so the session stays claimed for a while.
+CLAIM_FOR_S = 900
+ECHO_WAIT_S = float(os.environ.get("CTMUX_RESUME_ECHO_WAIT_S") or 10)
+marker_path = os.environ.get("CTMUX_RESUME_MARKER") or ""
+now = time.time()
+sent, claims = {}, {}
+try:
+	data = json.load(open(marker_path))
+	sent = {str(k): str(v) for k, v in data.get("sent", {}).items()}
+	claims = {str(k): float(v) for k, v in data.get("claims", {}).items()}
+except (OSError, ValueError, AttributeError, TypeError):
+	pass
+
+def save_marker():
+	if not marker_path:
+		return
+	data = {"sent": sent, "claims": {k: v for k, v in claims.items() if now - v < CLAIM_FOR_S}}
+	try:
+		tmp = f"{marker_path}.{os.getpid()}"
+		with open(tmp, "w") as f:
+			json.dump(data, f)
+		os.replace(tmp, marker_path)
+	except OSError:
+		pass
+
+def screen_hash(text):
+	return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
+
+def read_screen(ref):
+	return cmux("read-screen", "--surface", ref, "--lines", "30") or ""
+
+procs = None
+pending = []
+acted = reported = False
+for ref in refs:
+	if only and ref not in only:
+		continue
+	if not REF.fullmatch(ref) or ref not in idle:
+		continue
+	rec = (jcmux("surface", "resume", "show", "--json", "--surface", ref) or {}).get("restore_record")
+	if not isinstance(rec, dict):
+		continue
+	kind, cid = str(rec.get("kind") or ""), str(rec.get("checkpoint_id") or "")
+	if not TOKEN.fullmatch(kind) or not TOKEN.fullmatch(cid):
+		continue
+	screen = read_screen(ref)
+	state = newest_failure(kind, cid, screen)
+	if ref in sent and sent[ref] != screen_hash(screen):
+		# The screen moved on (the echo of the typed command, or a new launch):
+		# the marker has done its job.
+		del sent[ref]
+		save_marker()
+	if state is None:
+		continue
+	if state == "retried":
+		print(f"ctmux: {ref}: the re-run of `cmux restore {kind} {cid}` failed too — run it by hand in that pane")
+		reported = True
+		continue
+	if ref in sent:
+		print(f"ctmux: {ref}: the restore was typed earlier and has not shown up on the screen — leaving the pane alone")
+		reported = True
+		continue
+	if kind != "tmux":
+		if procs is None:
+			try:
+				procs = subprocess.run(["ps", "-axww", "-o", "command="], capture_output=True, text=True, timeout=20).stdout
+			except (OSError, subprocess.SubprocessError):
+				procs = ""
+		if re.search(r"(?<![A-Za-z0-9])" + re.escape(cid) + r"(?![A-Za-z0-9])", procs):
+			print(f"ctmux: {ref}: {kind} session {cid} is still running elsewhere — not resuming it a second time")
+			reported = True
+			continue
+		# The ps snapshot predates what this scan (or the previous run) typed,
+		# and the resumed process may not be in it yet: a second pane bound to
+		# the same session must not get a second writer on it either.
+		if now - claims.get(f"{kind} {cid}", 0) < CLAIM_FOR_S:
+			print(f"ctmux: {ref}: {kind} session {cid} is already being resumed in another pane — not resuming it twice")
+			reported = True
+			continue
+	if not dry_run:
+		# The snapshot above is seconds old by now (other panes, the echo
+		# waits): the pane may have gone busy, or the user may have used it.
+		# Look once more right before typing. cmux has no conditional send, so
+		# this narrows the window to a few milliseconds; it cannot close it.
+		fresh = jcmux("--json", "top", "--all", "--processes")
+		screen = read_screen(ref)
+		if fresh is None or ref not in idle_refs(fresh) or newest_failure(kind, cid, screen) != "stalled":
+			print(f"ctmux: {ref}: the pane changed while ctmux was looking at it — leaving it alone")
+			reported = True
+			continue
+	acted = True
+	if kind != "tmux":
+		claims[f"{kind} {cid}"] = now
+	if dry_run:
+		print(f"ctmux: would re-run the failed `cmux restore {kind} {cid}` in {ref}")
+	else:
+		# Marked before typing, so that a run which finds the screen still
+		# showing the old failure (the echo is slow, or never comes) leaves the
+		# pane alone instead of typing the restore again.
+		sent[ref] = screen_hash(screen)
+		save_marker()
+		if cmux("send", "--surface", ref, f"cmux restore --surface {ref}\\n") is None:
+			sent.pop(ref, None)
+			claims.pop(f"{kind} {cid}", None)
+			save_marker()
+			print(f"ctmux: {ref}: couldn't type the restore — run `cmux restore {kind} {cid}` in that pane")
+			continue
+		print(f"ctmux: re-ran the failed `cmux restore {kind} {cid}` in {ref}")
+		pending.append(ref)
+# Don't let another run in before the typed commands are on the screens: that
+# run then sees them and leaves the panes alone. One shared deadline, not one
+# per pane.
+deadline = time.monotonic() + ECHO_WAIT_S
+while pending and time.monotonic() < deadline:
+	pending = [r for r in pending if "cmux restore --surface" not in read_screen(r)]
+	if pending:
+		time.sleep(0.15)
+if explicit and not acted and not reported:
+	print("ctmux: no pane is waiting for a failed restore")
+PY
+}
+
+# Serialized: two overlapping runs (the login agent, a manual ctmux, the
+# cmux.json watcher) must not both type the restore into the same pane.
+resume_stalled_surfaces() {
+	# Each pane acted on may wait for its echo (up to 10 s), so a long wait for
+	# the lock is legitimate here; unlocked running is only the last resort.
+	local rc=0
+	lock_take "$(dirname "$CMUX_CFG")/.ctmux-resume.lock" 300
+	if [ -z "$LOCK_ACQUIRED" ]; then
+		# Two unlocked scans could both type into the same pane: do nothing.
+		lock_release
+		echo "ctmux: couldn't take the resume lock (another resume is still running, or ${CMUX_CFG%/*} isn't writable) — skipped the re-run of failed restores; run ctmux resume again" >&2
+		return 1
+	fi
+	CTMUX_RESUME_MARKER="$(dirname "$CMUX_CFG")/.ctmux-resume.sent" scan_stalled_surfaces "$@" || rc=$?
 	lock_release
 	return "$rc"
 }
@@ -368,6 +641,10 @@ ensure_mirror() {
 	fi
 	ensure_cmux_running || return 1
 	ensure_socket_auth || return 1
+	# Panes cmux auto-resumed before the heal (and before tmux was up) are
+	# waiting for this; see resume_stalled_surfaces. Only for the commands that
+	# mean "bring everything back" (ensure, bare ctmux), not ls/new.
+	[ -z "${CTMUX_RESUME:-}" ] || resume_stalled_surfaces || true
 
 	local out
 	if out=$(cx ssh-tmux localhost --no-focus 2>&1); then
@@ -491,14 +768,20 @@ case "$cmd" in
 		new_session "${1:-}"
 		;;
 	ensure)
-		ensure_mirror
+		CTMUX_RESUME=1 ensure_mirror
+		;;
+	resume)
+		shift || true
+		cmux_app_running || { echo "ctmux: cmux is not running — fix: open -a cmux, then ctmux resume" >&2; exit 1; }
+		ensure_socket_auth || exit 1
+		resume_stalled_surfaces --explicit "$@"
 		;;
 	"")
-		ensure_mirror
+		CTMUX_RESUME=1 ensure_mirror
 		open -a cmux
 		;;
 	*)
-		echo "ctmux: unknown command '$cmd' (try: ls, new [name], ensure, or no args)" >&2
+		echo "ctmux: unknown command '$cmd' (try: ls, new [name], ensure, resume [--dry-run] [--surface REF], or no args)" >&2
 		exit 1
 		;;
 esac

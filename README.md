@@ -48,6 +48,9 @@ ctmux            # ensure the mirror is up, launch/focus cmux
 ctmux ls          # fzf picker over session:window pairs
 ctmux new [name]  # create a new tmux session (auto-named if omitted), mirror it
 ctmux ensure      # idempotent mirror-check only (used by the LaunchAgent)
+ctmux resume      # re-run a `cmux restore` that failed in a pane (auth_required, tmux not up yet);
+                  # --dry-run only reports, --surface REF limits it to the given pane(s). ensure and bare
+                  # ctmux do this too once cmux accepts the socket password
 ```
 
 ## Prerequisites
