@@ -1,0 +1,6 @@
+#!/bin/sh
+# ctmux (Linux) launcher. `-I -S` = isolated interpreter without the site import: the
+# package is stdlib-only, and this halves Python's startup (see README, "Efficiency").
+if t=$(readlink "$0" 2>/dev/null); then case $t in /*) ;; *) t=${0%/*}/$t ;; esac; else t=$0; fi
+case $t in */*) ;; *) t=./$t ;; esac
+exec python3 -I -S -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); from ctmux_linux.cli import main; sys.exit(main(sys.argv[1:]))' "${t%/*}" "$@"

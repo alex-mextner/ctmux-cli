@@ -1,0 +1,1025 @@
+{
+  "recorded_from": "git show HEAD:install.sh (original shell installer)",
+  "scenarios": {
+    "config_garbage": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "enabled_false": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "enabled_then_disabled": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist",
+            "launchctl bootstrap gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled=true in $HOME/.config/rig/config.yaml — login LaunchAgent installed and running.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        },
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/cmux"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "enabled_true": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist",
+            "launchctl bootstrap gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled=true in $HOME/.config/rig/config.yaml — login LaunchAgent installed and running.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/cmux"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        },
+        {
+          "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.ultra.ctmux-ensure</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>$HOME/.local/bin/ctmux</string>\n\t\t<string>ensure</string>\n\t</array>\n\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n\t\t<string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>\n\t</dict>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>StandardOutPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n\t<key>StandardErrorPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n</dict>\n</plist>\n",
+          "kind": "file",
+          "path": "Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+        }
+      ]
+    },
+    "enabled_true_bin_on_path": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist",
+            "launchctl bootstrap gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "ctmux: tools.items.ctmux.enabled=true in $HOME/.config/rig/config.yaml — login LaunchAgent installed and running.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/cmux"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        },
+        {
+          "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.ultra.ctmux-ensure</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>$HOME/.local/bin/ctmux</string>\n\t\t<string>ensure</string>\n\t</array>\n\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n\t\t<string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>\n\t</dict>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>StandardOutPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n\t<key>StandardErrorPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n</dict>\n</plist>\n",
+          "kind": "file",
+          "path": "Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+        }
+      ]
+    },
+    "enabled_yes": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist",
+            "launchctl bootstrap gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled=true in $HOME/.config/rig/config.yaml — login LaunchAgent installed and running.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/cmux"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        },
+        {
+          "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.ultra.ctmux-ensure</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>$HOME/.local/bin/ctmux</string>\n\t\t<string>ensure</string>\n\t</array>\n\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n\t\t<string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>\n\t</dict>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>StandardOutPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n\t<key>StandardErrorPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n</dict>\n</plist>\n",
+          "kind": "file",
+          "path": "Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+        }
+      ]
+    },
+    "foreign_symlink": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "fresh_no_config": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "fresh_no_config_bin_on_path": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "item_missing": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "rerun_enabled_idempotent": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist",
+            "launchctl bootstrap gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled=true in $HOME/.config/rig/config.yaml — login LaunchAgent installed and running.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        },
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist",
+            "launchctl bootstrap gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled=true in $HOME/.config/rig/config.yaml — login LaunchAgent installed and running.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/cmux"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        },
+        {
+          "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.ultra.ctmux-ensure</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>$HOME/.local/bin/ctmux</string>\n\t\t<string>ensure</string>\n\t</array>\n\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n\t\t<string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>\n\t</dict>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>StandardOutPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n\t<key>StandardErrorPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n</dict>\n</plist>\n",
+          "kind": "file",
+          "path": "Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+        }
+      ]
+    },
+    "rerun_idempotent": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        },
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "stale_plist_disabled": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled is not true in $HOME/.config/rig/config.yaml — login LaunchAgent not installed.",
+            "       Enable it per-machine by adding to $HOME/.config/rig/config.yaml:",
+            "         tools:",
+            "           items:",
+            "             ctmux:",
+            "               repo: ~/xp/ctmux-cli",
+            "               enabled: true",
+            "       then re-run this install.sh.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        }
+      ]
+    },
+    "stale_plist_enabled": {
+      "bin_ctmux_executable": true,
+      "runs": [
+        {
+          "calls": [
+            "launchctl bootout gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist",
+            "launchctl bootstrap gui/<uid> $HOME/Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+          ],
+          "rc": 0,
+          "stdout": [
+            "ctmux: using local clone at $SRC",
+            "ctmux: symlinked $HOME/.local/bin/ctmux -> $SRC/bin/ctmux",
+            "",
+            "  NOTE: $HOME/.local/bin is not on your PATH.",
+            "  Add the following line to your ~/.zshrc and restart your shell:",
+            "    export PATH=\"$HOME/.local/bin:$PATH\"",
+            "",
+            "ctmux: tools.items.ctmux.enabled=true in $HOME/.config/rig/config.yaml — login LaunchAgent installed and running.",
+            "",
+            "  ctmux is installed.",
+            "  ctmux            ensure the mirror is up, launch/focus cmux",
+            "  ctmux ls         fzf picker over session:window pairs",
+            "  ctmux new [name] create a new tmux session and mirror it",
+            "  Docs: $SRC/README.md",
+            ""
+          ]
+        }
+      ],
+      "tree": [
+        {
+          "kind": "dir",
+          "path": ".config"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/cmux"
+        },
+        {
+          "kind": "dir",
+          "path": ".config/rig"
+        },
+        {
+          "kind": "file",
+          "path": ".config/rig/config.yaml"
+        },
+        {
+          "kind": "dir",
+          "path": ".local"
+        },
+        {
+          "kind": "dir",
+          "path": ".local/bin"
+        },
+        {
+          "kind": "symlink",
+          "path": ".local/bin/ctmux",
+          "target": "$SRC/bin/ctmux"
+        },
+        {
+          "kind": "dir",
+          "path": "Library"
+        },
+        {
+          "kind": "dir",
+          "path": "Library/LaunchAgents"
+        },
+        {
+          "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>Label</key>\n\t<string>com.ultra.ctmux-ensure</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>$HOME/.local/bin/ctmux</string>\n\t\t<string>ensure</string>\n\t</array>\n\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n\t\t<string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>\n\t</dict>\n\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>StandardOutPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n\t<key>StandardErrorPath</key>\n\t<string>$HOME/.config/cmux/ctmux-ensure.log</string>\n</dict>\n</plist>\n",
+          "kind": "file",
+          "path": "Library/LaunchAgents/com.ultra.ctmux-ensure.plist"
+        }
+      ]
+    }
+  },
+  "yaml": "pyyaml"
+}

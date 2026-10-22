@@ -9,15 +9,31 @@ permissions:
   contents: read
 
 jobs:
-  # ctmux is macOS-only and the cmux-detection tests use the real /usr/bin/pgrep.
+  # bin/ctmux is the macOS (cmux) shell script; its tests use the real /usr/bin/pgrep.
   tests:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - run: bash tests/ctmux_test.sh
 
+  # Python: the Linux ctmux (linux/) and the installer (install.py) on both
+  # OSes. The installer's Darwin path is exercised on Linux with a faked `uname`.
+  python-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: sudo apt-get install -y tmux fzf
+      - run: python3 -m unittest discover -s tests -v
+
+  python-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: brew install tmux fzf
+      - run: python3 -m unittest discover -s tests -v
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - run: shellcheck bin/ctmux tests/ctmux_test.sh
+      - run: shellcheck bin/ctmux tests/ctmux_test.sh install.sh linux/ctmux
