@@ -53,18 +53,6 @@ class RunTest(unittest.TestCase):
             finally:
                 os.environ["PATH"] = old
 
-    def test_extra_dirs_are_only_prepended_when_missing(self):
-        old = os.environ["PATH"]
-        os.environ["PATH"] = "/usr/bin:/usr/local/bin"
-        try:
-            util.add_extra_dirs_to_path()
-            parts = os.environ["PATH"].split(":")
-            self.assertEqual(parts.count("/usr/local/bin"), 1)
-            self.assertEqual(parts[-2:], ["/usr/bin", "/usr/local/bin"], "caller's own order must keep precedence")
-            self.assertIn("/home/linuxbrew/.linuxbrew/bin", parts)
-        finally:
-            os.environ["PATH"] = old
-
 
 class LauncherTest(unittest.TestCase):
     def test_launcher_is_tiny_and_runs_through_a_symlink(self):

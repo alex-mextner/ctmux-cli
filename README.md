@@ -132,7 +132,7 @@ The Linux ctmux is Python, so the floor is the interpreter's startup. `linux/ctm
 6-line `sh` launcher that starts it as `python3 -I -S` (isolated, no `site` import — nothing
 from site-packages is needed), which roughly halves startup; the package imports only what a
 command needs (no `json`/`re`/`subprocess`/`tempfile` on the hot path — a test pins that),
-runs external commands with `os.posix_spawn`, and never forks `uname`. Measured with
+runs external commands with `os.posix_spawn`, and never forks `uname`. It resolves `tmux`/`fzf` on the caller's `PATH` only (no PATH changes of its own); if `tmux` is missing it says `tmux not found — fix: sudo apt install tmux`. Measured with
 `tests/bench.py` on a private tmux server with 51 sessions / 101 windows (Ubuntu 26.04,
 16 cores, Python 3.14.8, tmux 3.6a; median of 30 runs; the machine was under memory
 pressure, so absolute numbers are pessimistic):
