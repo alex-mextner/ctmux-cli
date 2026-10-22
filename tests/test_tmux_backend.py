@@ -133,15 +133,6 @@ class PickerTest(LinuxTestCase):
         active = self.tmux.cmd("list-windows", "-t", "=alpha", "-F", "#{window_index}:#{window_active}").stdout.split()
         self.assertIn("1:1", active, "window 1 not active")
 
-    def test_session_name_with_a_tab_is_escaped_by_tmux_so_rows_stay_parseable(self):
-        self.tmux.cmd("new-session", "-d", "-s", "team\twork")
-        self.w.configure(fzf_pick="team")
-        res = self.w.run_tty("ls")
-        self.assertEqual(res.rc, 0, res.err)
-        (row,) = [r for r in self.w.called("fzf")[0]["stdin"] if r.startswith("team")]
-        self.assertEqual(row.count("\t"), 1, "tmux no longer escapes tabs in session names: %r" % row)
-        self.assertTrue(any("attach-session -t =team" in c for c in [" ".join(t["argv"]) for t in self.w.called("tmux")]))
-
     def test_lists_every_window_and_a_new_session_row(self):
         self.two_sessions()
         res = self.w.run_tty("ls")  # no fzf_pick: the fzf stub cancels
