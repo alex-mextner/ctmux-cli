@@ -53,9 +53,7 @@ def main():
     with open(fzf, "w") as f:
         f.write('#!/bin/sh\nIFS= read -r first\nprintf "%s\\n" "$first"\n')
     os.chmod(fzf, 0o755)
-    # The wrapper dir comes first, and /usr/local/bin + Linuxbrew's bin (which ctmux
-    # prepends when missing) are listed after it so they cannot shadow the wrapper.
-    env = {"HOME": os.path.join(tmp, "home"), "TMUX_TMPDIR": os.path.join(tmp, "t"), "PATH": os.path.join(tmp, "bin") + ":/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:" + os.environ["PATH"], "LC_ALL": "C.UTF-8"}
+    env = {"HOME": os.path.join(tmp, "home"), "TMUX_TMPDIR": os.path.join(tmp, "t"), "PATH": os.path.join(tmp, "bin") + ":" + os.environ["PATH"], "LC_ALL": "C.UTF-8"}
     # ctmux runs plain `tmux`, so a wrapper first on PATH pins every call to a
     # private socket (-L, no config file) under the private TMUX_TMPDIR, and
     # refuses to run if that dir is missing (tmux would silently fall back to

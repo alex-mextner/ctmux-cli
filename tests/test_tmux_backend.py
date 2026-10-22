@@ -8,15 +8,12 @@ import os
 import sys
 import unittest
 
-from world import LINUX, PrivateTmux, World, real_tmux_path
-
-EXTRA_DIRS = ("/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin")
-
+from world import LINUX, SYSTEM_PATH, PrivateTmux, World, real_tmux_path
 
 def on_path_in_extra_dirs(cmd):
-    """ctmux prepends /usr/local/bin and Linuxbrew's bin to PATH, so a hermetic
-    PATH can't hide a command installed there; such tests skip instead of lying."""
-    return any(os.access(os.path.join(d, cmd), os.X_OK) for d in EXTRA_DIRS)
+    """The test PATH keeps the system dirs after the stubs, so a hermetic PATH
+    cannot hide a command installed in them; such tests skip instead of lying."""
+    return any(os.access(os.path.join(d, cmd), os.X_OK) for d in SYSTEM_PATH.split(":"))
 
 
 @unittest.skipUnless(real_tmux_path(), "no tmux")

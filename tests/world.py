@@ -19,10 +19,8 @@ STUBS = os.path.join(TESTS, "stubs.py")
 
 # Commands ctmux may call; each is a logging stub.
 STUB_NAMES = ("tmux", "fzf")
-# ctmux prepends /usr/local/bin and Linuxbrew's bin when they are missing from
-# PATH; listing them here (after the stub dir) keeps that from putting a real
-# tmux in front of the stubs.
-SYSTEM_PATH = "/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# ctmux resolves tmux on the caller's PATH only (no PATH changes of its own).
+SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 def read_file(path):

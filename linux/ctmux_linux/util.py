@@ -9,21 +9,6 @@ merging stderr into it; feed stdin; inherit everything).
 import os
 import sys
 
-# A service manager or cron runs with a minimal PATH that lacks the places tmux
-# and fzf often live (/usr/local, Linuxbrew). Only the missing ones are
-# prepended, so a caller's own PATH order (and the test suite's stub dir) keeps
-# precedence.
-EXTRA_DIRS = ("/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin")
-
-
-def add_extra_dirs_to_path():
-    path = os.environ.get("PATH", "")
-    for d in EXTRA_DIRS:
-        if d not in path.split(":"):
-            path = d + ":" + path
-    os.environ["PATH"] = path
-
-
 def which(cmd):
     """First executable `cmd` on PATH (like `command -v`), or None."""
     if "/" in cmd:

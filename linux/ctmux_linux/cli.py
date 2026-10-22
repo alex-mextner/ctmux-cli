@@ -19,7 +19,6 @@ The canonical session is tmux.anti_sprawl.session from rig's config, else main.
 """
 import sys
 
-from . import util
 from .util import have, say
 
 UNKNOWN = "ctmux: unknown command '%s' (try: ls, new [name], ensure, or no args)"
@@ -28,7 +27,6 @@ UNKNOWN = "ctmux: unknown command '%s' (try: ls, new [name], ensure, or no args)
 def main(argv):
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
-    util.add_extra_dirs_to_path()
     cmd = argv[0] if argv else ""
     if cmd not in ("", "ls", "new", "ensure"):
         say(UNKNOWN % cmd)
