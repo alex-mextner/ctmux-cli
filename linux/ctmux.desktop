@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=ctmux
+GenericName=Terminal
+Comment=tmux sessions as workspaces, in a terminal window
+Exec=@CTMUX@ terminal
+Icon=utilities-terminal
+Terminal=false
+StartupNotify=true
+StartupWMClass=com.ctmux.Terminal
+Categories=System;TerminalEmulator;
+Keywords=terminal;tmux;shell;command;console;
+X-TerminalArgExec=-e
+X-TerminalArgTitle=--title
+X-TerminalArgDir=--working-directory

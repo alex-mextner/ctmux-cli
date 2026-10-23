@@ -1,0 +1,1 @@
+- `ctmux` — tmux session launcher (macOS: mirrors sessions into cmux; Linux: plain tmux): `ctmux` attach/create the canonical session, `ctmux ls` fzf picker over session:window, `ctmux new [name]` create-or-attach, `ctmux ensure` create the canonical session without a terminal. On Linux attaching needs a terminal; without one only `ensure` works.
