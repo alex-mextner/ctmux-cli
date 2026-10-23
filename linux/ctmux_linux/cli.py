@@ -14,6 +14,10 @@ Usage:
                    or open it if it exists
   ctmux ensure     create the canonical session detached if it is missing;
                    idempotent, never needs a terminal
+  ctmux here [dir] open a new window in dir in the canonical session and attach
+  ctmux terminal [-e CMD ...]
+                   open ctmux (or CMD) in a terminal window: the desktop's terminal
+                   entry, see terminal.py
 
 The canonical session is tmux.anti_sprawl.session from rig's config, else main.
 """
@@ -21,16 +25,20 @@ import sys
 
 from .util import have, say
 
-UNKNOWN = "ctmux: unknown command '%s' (try: ls, new [name], ensure, or no args)"
+UNKNOWN = "ctmux: unknown command '%s' (try: ls, new [name], here [dir], ensure, terminal, or no args)"
 
 
 def main(argv):
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
     cmd = argv[0] if argv else ""
-    if cmd not in ("", "ls", "new", "ensure"):
+    if cmd not in ("", "ls", "new", "ensure", "terminal", "here"):
         say(UNKNOWN % cmd)
         return 1
+    if cmd == "terminal":
+        from .terminal import main as terminal
+
+        return terminal(argv[1:])
     from .tmux_backend import Tmux, pkg_hint
 
     if not have("tmux"):
@@ -43,6 +51,8 @@ def main(argv):
         t.new_session(argv[1] if len(argv) > 1 else "")
     elif cmd == "ensure":
         t.ensure()
+    elif cmd == "here":
+        t.here(argv[1] if len(argv) > 1 else "")
     else:
         t.bare()
     return 0

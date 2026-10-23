@@ -9,6 +9,8 @@ merging stderr into it; feed stdin; inherit everything).
 import os
 import sys
 
+LINUX_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # <checkout>/linux
+
 def which(cmd):
     """First executable `cmd` on PATH (like `command -v`), or None."""
     if "/" in cmd:

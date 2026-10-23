@@ -178,7 +178,7 @@ class MissingToolTest(unittest.TestCase):
         self.addCleanup(w.cleanup)
         res = w.run("frobnicate")
         self.assertEqual(res.rc, 1)
-        self.assertEqual(res.err, "ctmux: unknown command 'frobnicate' (try: ls, new [name], ensure, or no args)\n")
+        self.assertEqual(res.err, "ctmux: unknown command 'frobnicate' (try: ls, new [name], here [dir], ensure, terminal, or no args)\n")
 
 
 class RigConfigTest(unittest.TestCase):

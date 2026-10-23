@@ -77,11 +77,12 @@ class InstallTest(unittest.TestCase):
         repo files are never touched."""
         self.repo = os.path.join(self.W, "repo")
         os.makedirs(os.path.join(self.repo, "bin"))
-        os.makedirs(os.path.join(self.repo, "linux"))
+        os.makedirs(os.path.join(self.repo, "linux"))  # before the linux/ files below are copied in
         for name in ("install.sh", "install.py"):
             shutil.copyfile(os.path.join(ROOT, name), os.path.join(self.repo, name))
         shutil.copytree(os.path.join(ROOT, "skill"), os.path.join(self.repo, "skill"))
         shutil.copytree(os.path.join(ROOT, "launchd"), os.path.join(self.repo, "launchd"))
+        shutil.copyfile(os.path.join(ROOT, "linux", "ctmux.desktop"), os.path.join(self.repo, "linux", "ctmux.desktop"))
         for entry in ("bin/ctmux", "linux/ctmux"):
             self.write(os.path.join(self.repo, entry), "#!/bin/sh\nexit 0\n", 0o644)
 
@@ -305,6 +306,48 @@ class InstallTest(unittest.TestCase):
         os.remove(os.path.join(self.bin, "fzf"))
         self.run_install("--check")
         self.assertRc(1)
+
+    def desktop_entry(self) -> str:
+        return os.path.join(self.home, ".local/share/applications/ctmux.desktop")
+
+    def test_linux_installs_a_terminal_desktop_entry_with_an_absolute_exec(self) -> None:
+        self.have_cmd("tmux", "fzf")
+        self.run_install()
+        self.assertRc(0)
+        entry = read(self.desktop_entry())
+        self.assertIn("Exec=%s terminal\n" % self.link_path(), entry)
+        self.assertIn("TerminalEmulator", entry)
+        self.assertNotIn("@CTMUX@", entry)
+
+    def test_linux_check_catches_a_missing_or_stale_desktop_entry(self) -> None:
+        self.have_cmd("tmux", "fzf")
+        self.run_install()
+        os.remove(self.desktop_entry())
+        self.run_install("--check")
+        self.assertRc(1)
+        self.assertIn("ctmux.desktop", self.out)
+        self.run_install()
+        self.write(self.desktop_entry(), "[Desktop Entry]\nExec=old\n")
+        self.run_install("--check")
+        self.assertRc(1)
+        self.run_install()
+        self.run_install("--check")
+        self.assertRc(0)
+
+    def test_exec_path_with_reserved_characters_is_quoted(self) -> None:
+        spec = importlib.util.spec_from_file_location("ctmux_install", os.path.join(ROOT, "install.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.assertEqual(mod.exec_quote("/home/u/.local/bin/ctmux"), "/home/u/.local/bin/ctmux")
+        self.assertEqual(mod.exec_quote("/home/a b/bin/ctmux"), '"/home/a b/bin/ctmux"')
+        self.assertEqual(mod.exec_quote("/h/50%/ctmux"), "/h/50%%/ctmux")
+        self.assertEqual(mod.exec_quote('/h/a"b/x'), '"/h/a\\\\"b/x"')
+
+    def test_darwin_does_not_get_a_desktop_entry(self) -> None:
+        self.write(os.path.join(self.W, "uname_s"), "Darwin\n")
+        self.have_cmd("tmux", "fzf")
+        self.run_install()
+        self.assertFalse(os.path.exists(self.desktop_entry()))
 
     def test_linux_check_catches_a_link_to_another_checkout(self) -> None:
         self.have_cmd("tmux", "fzf")

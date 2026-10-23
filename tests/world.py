@@ -94,10 +94,11 @@ class World:
 
     # ---- running ----
 
-    def run(self, *args, stdin=None, timeout=120, **envkw):
+    def run(self, *args, stdin=None, timeout=120, cwd=None, **envkw):
         p = subprocess.run(
             [LAUNCHER] + list(args),
             env=self.env(**envkw),
+            cwd=cwd,
             input=stdin if stdin is not None else "",
             capture_output=True,
             text=True,

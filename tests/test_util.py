@@ -64,7 +64,7 @@ class LauncherTest(unittest.TestCase):
             os.symlink(launcher, link)
             for argv in ([link], [launcher]):
                 p = subprocess.run(argv + ["frobnicate"], capture_output=True, text=True)
-                self.assertEqual((p.returncode, p.stderr), (1, "ctmux: unknown command 'frobnicate' (try: ls, new [name], ensure, or no args)\n"))
+                self.assertEqual((p.returncode, p.stderr), (1, "ctmux: unknown command 'frobnicate' (try: ls, new [name], here [dir], ensure, terminal, or no args)\n"))
 
 
 class HygieneTest(unittest.TestCase):

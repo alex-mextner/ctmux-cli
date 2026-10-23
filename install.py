@@ -7,8 +7,9 @@
          (default off, a standard tools.items.<name> key). Nothing is
          brew-installed: a missing tmux / fzf / cmux is only a note.
   Linux  tmux + fzf (apt, or Homebrew when apt is not usable), symlink
-         linux/ctmux onto PATH, advertise the agent skill. No cmux, osascript
-         or LaunchAgent: ctmux runs on tmux alone there.
+         linux/ctmux onto PATH, a terminal desktop entry (ctmux.desktop, runs
+         `ctmux terminal`), advertise the agent skill. No cmux, osascript or
+         LaunchAgent: ctmux runs on tmux alone there.
 
 Usage: ./install.sh [--check] [--dry-run]
   --check    change nothing; exit 0 only when everything is installed
@@ -42,6 +43,9 @@ SKILLS_DIR = os.path.join(HOME, ".agents/skills")
 SKILL_DEST = os.path.join(SKILLS_DIR, "ctmux/SKILL.md")
 BLURB_DEST = os.path.join(SKILLS_DIR, ".blurbs/ctmux.md")
 SRC = os.path.dirname(os.path.abspath(__file__))
+DATA_HOME = os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share")
+APPS_DIR = os.path.join(DATA_HOME, "applications")
+DESKTOP_DEST = os.path.join(APPS_DIR, "ctmux.desktop")
 
 
 def out(msg: str = "") -> None:
@@ -51,6 +55,25 @@ def out(msg: str = "") -> None:
 def die(msg: str) -> None:
     print("ERROR: " + msg, file=sys.stderr, flush=True)
     sys.exit(1)
+
+
+def exec_quote(path: str) -> str:
+    """A path as one argument of a .desktop Exec line (Desktop Entry spec, "The Exec key"):
+    quoted when it holds a reserved character, with ", `, $ and \\ escaped (and the backslashes
+    doubled again for the key-file string syntax), % as %%."""
+    if not any(c in " \t\n\"'\\><~|&;$*?#()`" for c in path):
+        return path.replace("%", "%%")
+    out = ""
+    for c in path:
+        if c in '"`$':
+            out += "\\\\" + c
+        elif c == "\\":
+            out += "\\\\\\\\"
+        elif c == "%":
+            out += "%%"
+        else:
+            out += c
+    return '"' + out + '"'
 
 
 def have(cmd: str) -> bool:
@@ -255,6 +278,38 @@ class Installer:
             out('    export PATH="%s:$PATH"' % BIN)
             out("")
 
+    def desktop_entry(self) -> None:
+        """Linux: ~/.local/share/applications/ctmux.desktop, a terminal entry whose Exec is
+        `ctmux terminal` (absolute path: the desktop session's PATH may lack ~/.local/bin).
+        Making it THE terminal is not done here: list `ctmux.desktop` first in
+        ~/.config/xdg-terminals.list (xdg-terminal-exec, Ctrl+Alt+T on GNOME) — a file a
+        dotfiles profile can declare."""
+        with open(os.path.join(SRC, "linux/ctmux.desktop"), encoding="utf-8") as fh:
+            wanted = fh.read().replace("@CTMUX@", exec_quote(os.path.join(BIN, "ctmux")))
+        self.sync_text(wanted, DESKTOP_DEST, "terminal entry")
+
+    def sync_text(self, wanted: str, dest: str, what: str) -> None:
+        """Make dest hold `wanted`: ok / MISSING under --check, written otherwise."""
+        try:
+            with open(dest, encoding="utf-8") as fh:
+                same = fh.read() == wanted
+        except OSError:
+            same = False
+        if same:
+            if self.check:
+                self.ok(dest)
+        elif self.check:
+            self.bad("%s (%s; run install.sh)" % (dest, what))
+        else:
+            parent = os.path.dirname(dest)
+
+            def write() -> None:
+                os.makedirs(parent, exist_ok=True)
+                with open(dest, "w", encoding="utf-8") as fh:
+                    fh.write(wanted)
+
+            self.act("write " + dest, write)
+
     # rig treats a tool as provisioned only when its skill blurb exists
     # (~/.agents/skills/.blurbs/<tool>.md); without it rig re-runs this script
     # on every apply. The files are copies, refreshed whenever they differ.
@@ -356,6 +411,8 @@ class Installer:
         self.advertise(os.path.join(SRC, "skill/blurb.md"), BLURB_DEST)
         if self.os_name == "Darwin":
             self.launch_agent()
+        else:
+            self.desktop_entry()
 
         if self.check:
             if self.problems == 0:

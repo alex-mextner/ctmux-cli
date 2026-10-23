@@ -15,6 +15,7 @@ import sys
 from . import rigcfg, util
 from .util import Stdio, have, run, say, sh_out
 
+KEYS_CONF = os.path.join(util.LINUX_DIR, "tmux.conf")
 LIST_FORMAT = "#{session_name}\t#{window_index} (#{window_name})"
 
 
@@ -45,10 +46,30 @@ class Tmux:
             return
         rc, text = run(["tmux", "new-session", "-d", "-s", name, "-c", self.home], stdout=Stdio.PIPE, stderr=Stdio.MERGE)
         if rc == 0:
+            self.load_keys()
             return
         rc, _ = run(["tmux", "has-session", "-t", "=" + name], stderr=Stdio.DEVNULL)
         if rc != 0:
             say(f"ctmux: could not create tmux session '{name}': {sh_out(text)}")
+            sys.exit(1)
+
+    def load_keys(self):
+        """Source ctmux's key bindings (linux/tmux.conf: Ctrl+Tab = next window, ...) and then the
+        user's ~/.config/ctmux/tmux.conf into the running server. They are global key bindings
+        (re-binding is idempotent), so this runs on every attach and on session creation. A
+        missing user file is skipped; a syntax error in either file is tmux's own message on stderr."""
+        confs = [KEYS_CONF]
+        user = os.path.join(self.home, ".config", "ctmux", "tmux.conf")
+        if os.path.exists(user):
+            confs.append(user)
+        for conf in confs:
+            run(["tmux", "source-file", conf])
+
+    @staticmethod
+    def need_terminal():
+        """Attaching needs a terminal unless we are already inside tmux (then it is a switch-client)."""
+        if not os.environ.get("TMUX") and not (os.isatty(0) and os.isatty(1)):
+            say("ctmux: attaching needs a terminal — fix: run ctmux in a terminal, or use 'ctmux ensure' to only create the session")
             sys.exit(1)
 
     def go(self, session, window=""):
@@ -58,12 +79,9 @@ class Tmux:
         chosen on purpose and there is no other mirror to protect, only the
         user's own choice. exec: no process left behind, tmux's exit status is
         ctmux's."""
-        verb = "attach-session"
-        if os.environ.get("TMUX"):
-            verb = "switch-client"
-        elif not (os.isatty(0) and os.isatty(1)):
-            say("ctmux: attaching needs a terminal — fix: run ctmux in a terminal, or use 'ctmux ensure' to only create the session")
-            sys.exit(1)
+        verb = "switch-client" if os.environ.get("TMUX") else "attach-session"
+        self.need_terminal()
+        self.load_keys()
         argv = ["tmux"]
         if window:
             argv += ["select-window", "-t", f"={session}:{window}", ";"]
@@ -109,6 +127,17 @@ class Tmux:
         # first real tab in a row is always the session/window separator.
         session, _, rest = sel.partition("\t")
         self.go(session, rest.split(" ")[0])
+
+    def here(self, directory):
+        """`ctmux here DIR`: a new window in DIR in the canonical session, then attach (the new window is
+        the current one). What "Open in Terminal" runs, so the shell lands in the folder that was asked for."""
+        session = self.canonical_session()
+        self.need_terminal()  # before the window exists: a retry without a terminal must not leak windows
+        self.ensure_session(session)
+        directory = os.path.abspath(directory) if directory else ""
+        if directory and os.path.isdir(directory):
+            run(["tmux", "new-window", "-t", f"={session}:", "-c", directory])
+        self.go(session)
 
     def ensure(self):
         self.ensure_session(self.canonical_session())

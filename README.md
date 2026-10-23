@@ -25,8 +25,10 @@ general-purpose feature) — a standalone wrapper repo, personal to this machine
 | `ctmux` | mirror the canonical session into cmux, launch/focus cmux | ensure the canonical session exists, attach to it (`switch-client` when already inside tmux) |
 | `ctmux ls` | fzf over `session  window` pairs; Enter mirrors + focuses that **session** | same picker; Enter attaches to that session **and selects that window** |
 | `ctmux new [name]` | create a session (`ws-HHMMSS` if unnamed), mirror, focus | create a session (same naming) or open it if it exists; attach / switch |
+| `ctmux here [dir]` | — | new window in dir in the canonical session, attach |
+| `ctmux terminal [-e CMD]` | — (cmux is the window) | open ctmux (or CMD) in a terminal window, see below |
 | `ctmux ensure` | idempotent mirror check; launches cmux if needed (the login LaunchAgent uses this) | create the canonical session detached if missing; never needs a terminal |
-| Needs | tmux, fzf, python3, cmux, Remote Login + key-based SSH to localhost | tmux, fzf (for `ls`), python3 ≥ 3.9 |
+| Needs | tmux, fzf, python3, cmux, Remote Login + key-based SSH to localhost | tmux (≥ 3.2 for the key bindings), fzf (for `ls`), python3 ≥ 3.9 |
 | Login hook | opt-in LaunchAgent (`launchd/`) | none (see [#11](https://github.com/alex-mextner/ctmux-cli/issues/11)) |
 
 `install.sh` picks the right entry point: on macOS `~/.local/bin/ctmux` links to `bin/ctmux`
@@ -125,6 +127,38 @@ ctmux ls          # fzf picker over session:window pairs
 ctmux new [name]  # create a new tmux session (auto-named if omitted) or open it
 ctmux ensure      # idempotent, no terminal needed (the LaunchAgent uses this on macOS)
 ```
+
+## Linux: ctmux as the terminal
+
+cmux (macOS) is the window; on Linux the window is a terminal emulator and ctmux is what it runs.
+`ctmux terminal` opens one, `ctmux terminal -e CMD` runs CMD in one (a bare login shell from
+`xdg-terminal-exec` becomes `ctmux`, a real command runs as asked). Emulator order: **Ghostty**
+(cmux is Ghostty-based, and it is the only one of these that can deliver Ctrl+Tab to tmux), Ptyxis,
+GNOME Terminal, `x-terminal-emulator`; `$CTMUX_TERMINAL` forces one. The Ghostty window is started
+with its own class and `linux/ghostty.conf`, layered over `~/.config/ghostty/config`.
+
+`ctmux here DIR` (what "Open in Terminal" runs when a folder is given) opens a new window in DIR in the canonical
+session and attaches. `install.sh` writes `~/.local/share/applications/ctmux.desktop` (`Exec=<abs>/ctmux terminal`). To make
+ctmux THE terminal (Ctrl+Alt+T, "Open in Terminal"), list it first in `~/.config/xdg-terminals.list`:
+
+```
+ctmux.desktop
+org.gnome.Ptyxis.desktop
+```
+
+On macOS cmux shows tmux windows as tabs. The same keys drive tmux windows here (`linux/tmux.conf`,
+loaded into the tmux server whenever `ctmux` attaches a client and when `ctmux ensure` creates the server; your own additions go in
+`~/.config/ctmux/tmux.conf`, sourced after it):
+
+| key | action |
+|---|---|
+| Ctrl+Tab / Ctrl+Shift+Tab | next / previous tmux window |
+| Ctrl+Shift+T | new window in the current directory |
+| Alt+1 … Alt+9 | select window number N (the number in the status bar), **in a Ghostty client only**; other terminals' clients pass the key to the program |
+
+A terminal has to deliver Ctrl+Tab to tmux as an extended key; the Ghostty window sends CSI-u
+(`linux/ghostty.conf`), tmux reads it (`extended-keys on`). VTE terminals (Ptyxis, GNOME Terminal)
+send a plain Tab for Ctrl+Tab and cannot, so there the keys are not available — use Ghostty.
 
 ## Linux: efficiency
 
