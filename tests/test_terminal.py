@@ -105,7 +105,9 @@ class TerminalTest(unittest.TestCase):
         emulator(self.w, "ghostty")
         os.makedirs(os.path.join(self.w.home, "proj"))
         self.assertEqual(self.w.run("terminal", "--working-directory=proj", "-e", "make", cwd=self.w.home).rc, 0)
-        self.assertIn("--working-directory=" + os.path.join(self.w.home, "proj"), args_of(self.w, "ghostty"))
+        wanted = os.path.realpath(os.path.join(self.w.home, "proj"))
+        given = [os.path.realpath(a.split("=", 1)[1]) for a in args_of(self.w, "ghostty") if a.startswith("--working-directory=")]
+        self.assertEqual(given, [wanted])
 
     def test_an_unknown_option_is_a_usage_error_not_a_command(self):
         emulator(self.w, "ghostty")
@@ -116,7 +118,8 @@ class TerminalTest(unittest.TestCase):
 
     def test_a_symlink_to_xdg_terminal_exec_is_not_an_emulator(self):
         emulator(self.w, "ptyxis")
-        os.symlink("/usr/bin/xdg-terminal-exec", self.w.p("bin", "ghostty"))
+        self.w.stub("xdg-terminal-exec", "exit 0")  # a real executable the symlink resolves to
+        os.symlink(self.w.p("bin", "xdg-terminal-exec"), self.w.p("bin", "ghostty"))
         if on_path_in_extra_dirs("ghostty"):
             self.skipTest("a real ghostty is installed in a system dir")
         self.assertEqual(self.w.run("terminal", "-e", "htop").rc, 0)
@@ -215,9 +218,9 @@ class KeyBindingTest(unittest.TestCase):
         return p.stdout.strip()
 
     def stop(self):
-        # No kill-server: every shell in the private server just exits.
-        for w in self.tm("list-windows", "-t", "s", "-F", "#I").split():
-            self.tm("send-keys", "-t", "s:" + w, "C-c", "exit", "Enter")
+        # The same teardown PrivateTmux.kill uses: kill-server on this test's own socket (-L, private TMUX_TMPDIR),
+        # so nothing else can be reached; exiting the shells one by one leaves servers behind when a pane is busy.
+        self.tm("kill-server")
         self.reap()
 
     def reap(self):
@@ -315,11 +318,11 @@ class CtmuxLoadsKeysTest(LinuxTestCase):
         self.assertEqual(res.rc, 0)
         self.assertIn("not-a-tmux-command", res.err + res.out)
 
-    def test_loading_keys_repeatedly_does_not_grow_the_server_state(self):
-        self.w.run("ensure")
+    def test_attaching_repeatedly_does_not_grow_the_server_state(self):
+        self.assertEqual(self.w.run_tty().rc, 0)
         before = self.tmux.cmd("show", "-s").stdout
         for _ in range(3):
-            self.w.run("ensure")
+            self.assertEqual(self.w.run_tty().rc, 0)  # every attach sources the key bindings again
         self.assertEqual(self.tmux.cmd("show", "-s").stdout, before)
 
     def test_here_opens_a_window_in_the_directory_of_the_canonical_session(self):
@@ -328,7 +331,7 @@ class CtmuxLoadsKeysTest(LinuxTestCase):
         res = self.w.run_tty("here", d)
         self.assertEqual(res.rc, 0, res.err)
         paths = self.tmux.cmd("list-windows", "-t", "=main", "-F", "#{pane_current_path}").stdout.split()
-        self.assertEqual(sorted(paths), sorted([self.w.home, d]))
+        self.assertEqual(sorted(os.path.realpath(p) for p in paths), sorted(os.path.realpath(p) for p in [self.w.home, d]))
 
     def test_here_without_a_terminal_creates_no_window(self):
         res = self.w.run("here", self.w.home)
